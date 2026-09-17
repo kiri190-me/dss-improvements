@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+/*
+ * 사무실 PC 에서 글을 읽고 적는 화면이다. 밝은 배경 하나로 고정한다.
+ * (기기마다 색이 달라지면 "내 화면에서는 이렇게 보인다" 를 맞춰 보기 어렵다)
+ */
+:root {
+  color-scheme: light;
+}
+
+@theme inline {
+  --font-sans:
+    "Pretendard", -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic",
+    "맑은 고딕", sans-serif;
+  --font-mono: "Cascadia Mono", "Consolas", "D2Coding", ui-monospace, monospace;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: #f1f5f9;
+  color: #0f172a;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}

@@ -1,0 +1,1 @@
+# 지금은 비어 있다. Dockerfile 3단계가 /app/public 을 COPY 하므로 폴더 자체는 있어야 한다

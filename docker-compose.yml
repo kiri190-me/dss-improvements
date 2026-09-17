@@ -1,0 +1,64 @@
+# DSS 개선요청 전용 PostgreSQL (개발용).
+#
+# ⚠️ 반드시 `npm run db:up` 으로 띄운다.
+#   docker compose 는 .env 만 자동으로 읽고 .env.local 은 읽지 않는다. 그냥
+#   `docker compose up` 을 하면 POSTGRES_PASSWORD 가 빈 값이 되어 컨테이너가
+#   재시작 루프에 빠진다. db:up 스크립트가 --env-file .env.local 을 붙인다.
+#   (dss-auth 와 계측기 시스템에서 실제로 겪은 함정이라 같은 장치를 둔다.)
+#
+# 포트가 5446 인 이유: 이 개발 PC 에서 5432·5433(A/S 옛 상자) · 5434(dss-auth
+# 옛 상자) · 5436(회사 홈페이지) · 5438(계측기 옛 상자) · 5442(dss-pg-app 공용) ·
+# 5444(dss-pg-auth) 가 이미 쓰인다. 로그인 왕복을 보려면 포털과 이 사이트가
+# 동시에 떠 있어야 하므로 겹치면 안 된다.
+#
+# ── 🔴 공용 인스턴스에 얹는 길도 있다 (사람이 고를 일) ──────────────────
+#
+# 2026-09-03 부터 이 PC 의 업무 DB 는 인스턴스 하나에 모여 있다 —
+# `dss-pg-app`(5442) 안에 dss_as · dss_as_test · dss_meters 가 들어 있고,
+# 앱마다 롤이 따로라 서로의 DB 에 닿지 못한다(실측: permission denied).
+# 자세한 것은 dss-deploy/runbook/01-postgres-통합.md.
+#
+# 그 인스턴스에 dss_improvements 를 하나 더 만드는 편이 상자를 덜 띄운다.
+# 다만 그것은 **이미 운영 자료가 들어 있는 인스턴스를 건드리는 일**이라
+# Claude 가 임의로 하지 않는다. 사람이 고르고, 고르면 이렇게 한다:
+#
+#   docker exec -it dss-pg-app psql -U postgres -c "CREATE ROLE dss_improvements_app LOGIN PASSWORD '...'"
+#   docker exec -it dss-pg-app psql -U postgres -c "CREATE DATABASE dss_improvements OWNER dss_improvements_app"
+#   # 그리고 .env.local 의 DATABASE_URL 을 5442/dss_improvements 로 바꾼다
+#   # (NAS 쪽은 dss-deploy/nas/init/app/ 의 초기화 스크립트에 한 벌 더 적어야 한다 —
+#   #  그 스크립트는 볼륨이 빌 때 한 번만 돌므로, 이미 돌아간 NAS 에서는 손으로 만든다)
+#
+# 아래 상자는 그 결정이 나기 전까지 혼자 서서 개발할 수 있게 하는 것이다.
+# 공용 인스턴스로 옮기면 이 파일은 되돌리기용으로만 남는다.
+#
+# 운영(NAS Docker)에서는 이 파일을 쓰지 않는다. 개발 PC 전용이다.
+#
+# 버전을 17 로 맞춘 이유: NAS 운영 인스턴스가 postgres:17 이다. 개발 DB 가
+# 낮으면 운영에서 뜬 백업 dump 를 열지 못하고(아카이브 형식 거절), 되돌려
+# 보지 못하는 백업은 백업이라 부르기 어렵다.
+#
+# 127.0.0.1 에만 바인딩한다 — 개발 PC 밖에서는 직접 접속할 수 없다.
+services:
+  db-dev:
+    image: postgres:17.11-alpine
+    container_name: dss-improvements-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dss_improvements_app
+      POSTGRES_PASSWORD: ${DEV_POSTGRES_PASSWORD}
+      POSTGRES_DB: dss_improvements_dev
+      # 한국어로 적은 글을 정렬·검색하므로 로케일을 명시한다.
+      LANG: ko_KR.UTF-8
+    ports:
+      - "127.0.0.1:5446:5432"
+    volumes:
+      - dss-improvements-postgres-dev-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dss_improvements_app -d dss_improvements_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  dss-improvements-postgres-dev-data:
+    name: dss-improvements-postgres-dev-data

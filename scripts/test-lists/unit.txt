@@ -1,0 +1,31 @@
+# 목록 unit — `npm test` 가 돌린다.
+#
+# 플래그(package.json 의 "test"):
+#   --import tsx --test
+#   - tsx 가 TypeScript 를 그대로 읽고 tsconfig 의 `@/*` 경로도 풀어 준다.
+#   - 부트스트랩을 싣지 않는다 — 환경변수도, DB 도 없다. 🔴 이 목록의 시험은
+#     DB 에 닿을 길이 없어야 한다. DB 에 붙는 시험이 필요해지면 목록을 하나 더
+#     만들고(db.txt) package.json 에 그 목록을 부르는 스크립트를 더한다.
+#     본보기는 RF_Service_System/scripts/test-lists/db.txt.
+#
+# 적는 법:
+#   - 한 줄에 한 경로. 저장소 뿌리 기준 상대경로, 구분자는 슬래시, 대소문자까지 정확히.
+#   - `#` 로 시작하는 줄과 빈 줄은 건너뛴다.
+#   - 없는 파일, 같은 줄 두 번이 있으면 scripts/run-test-list.mjs 가 돌기 전에 멈춘다.
+#   - 🔴 새 *.test.ts(x) 는 반드시 여기 적는다. 빠지면
+#     scripts/test-lists/test-list-registration.test.ts 가 `npm test` 에서 실패한다.
+#   - node --test 는 받은 파일을 이름순으로 정렬해 돈다 — 줄 순서는 실행 순서가 아니다.
+
+scripts/test-lists/test-list-registration.test.ts
+src/lib/domain/service-catalog.test.ts
+src/lib/domain/improvement-request.test.ts
+src/lib/validation/improvement-request-input.test.ts
+src/lib/auth/improvement-request-authorization.test.ts
+src/lib/db/schema-domain-parity.test.ts
+src/lib/server/actions/improvement-requests-guard.test.ts
+src/lib/domain/attachment-file.test.ts
+src/lib/domain/attachment-path.test.ts
+src/lib/domain/improvement-request-list.test.ts
+src/lib/storage/attachment-storage.test.ts
+src/lib/db/attachment-guard.test.ts
+src/components/improvement-requests/improvement-request-screenshot-files.test.ts

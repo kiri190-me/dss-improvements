@@ -1,0 +1,7 @@
+# 최종 운영은 NAS(Synology, Linux) Docker 다. 줄바꿈을 LF 로 고정해 두면
+# Windows 에서 적은 파일이 컨테이너 안에서 다르게 읽히는 일이 없다.
+* text=auto eol=lf
+*.jpg  binary
+*.jpeg binary
+*.png  binary
+*.ico  binary

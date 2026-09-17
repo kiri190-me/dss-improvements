@@ -1,0 +1,418 @@
+{
+  "id": "206dd6b8-f6e6-48ec-a2f1-eb29412ac72e",
+  "prevId": "1818553c-985b-46d5-81a6-f3886050b2a8",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.improvement_requests": {
+      "name": "improvement_requests",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "service_key": {
+          "name": "service_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "menu_key": {
+          "name": "menu_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "improvement_request_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'OPEN'"
+        },
+        "in_progress_by": {
+          "name": "in_progress_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "in_progress_at": {
+          "name": "in_progress_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_by": {
+          "name": "resolved_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "imported_from": {
+          "name": "imported_from",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "imported_ref": {
+          "name": "imported_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "imported_author_name": {
+          "name": "imported_author_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_deleted": {
+          "name": "is_deleted",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_by": {
+          "name": "deleted_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "delete_reason": {
+          "name": "delete_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "improvement_requests_created_at_idx": {
+          "name": "improvement_requests_created_at_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "improvement_requests_imported_uq": {
+          "name": "improvement_requests_imported_uq",
+          "columns": [
+            {
+              "expression": "imported_from",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "imported_ref",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"improvement_requests\".\"imported_from\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "improvement_requests_in_progress_by_web_users_id_fk": {
+          "name": "improvement_requests_in_progress_by_web_users_id_fk",
+          "tableFrom": "improvement_requests",
+          "tableTo": "web_users",
+          "columnsFrom": [
+            "in_progress_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "improvement_requests_resolved_by_web_users_id_fk": {
+          "name": "improvement_requests_resolved_by_web_users_id_fk",
+          "tableFrom": "improvement_requests",
+          "tableTo": "web_users",
+          "columnsFrom": [
+            "resolved_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "improvement_requests_created_by_web_users_id_fk": {
+          "name": "improvement_requests_created_by_web_users_id_fk",
+          "tableFrom": "improvement_requests",
+          "tableTo": "web_users",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "improvement_requests_updated_by_web_users_id_fk": {
+          "name": "improvement_requests_updated_by_web_users_id_fk",
+          "tableFrom": "improvement_requests",
+          "tableTo": "web_users",
+          "columnsFrom": [
+            "updated_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "improvement_requests_body_length": {
+          "name": "improvement_requests_body_length",
+          "value": "char_length(\"improvement_requests\".\"body\") BETWEEN 1 AND 2000"
+        },
+        "improvement_requests_status_columns": {
+          "name": "improvement_requests_status_columns",
+          "value": "\n        (\"improvement_requests\".\"status\" = 'OPEN' AND \"improvement_requests\".\"in_progress_at\" IS NULL AND \"improvement_requests\".\"resolved_at\" IS NULL)\n        OR\n        (\"improvement_requests\".\"status\" = 'IN_PROGRESS' AND \"improvement_requests\".\"in_progress_at\" IS NOT NULL AND \"improvement_requests\".\"resolved_at\" IS NULL)\n        OR\n        (\"improvement_requests\".\"status\" = 'RESOLVED' AND \"improvement_requests\".\"resolved_at\" IS NOT NULL)\n      "
+        },
+        "improvement_requests_actor_pairs": {
+          "name": "improvement_requests_actor_pairs",
+          "value": "\n        (\"improvement_requests\".\"in_progress_by\" IS NULL OR \"improvement_requests\".\"in_progress_at\" IS NOT NULL)\n        AND (\"improvement_requests\".\"resolved_by\" IS NULL OR \"improvement_requests\".\"resolved_at\" IS NOT NULL)\n      "
+        },
+        "improvement_requests_origin": {
+          "name": "improvement_requests_origin",
+          "value": "\n        (\"improvement_requests\".\"imported_from\" IS NULL AND \"improvement_requests\".\"imported_ref\" IS NULL\n          AND \"improvement_requests\".\"imported_author_name\" IS NULL AND \"improvement_requests\".\"created_by\" IS NOT NULL)\n        OR\n        (\"improvement_requests\".\"imported_from\" IS NOT NULL AND \"improvement_requests\".\"imported_ref\" IS NOT NULL\n          AND (\"improvement_requests\".\"created_by\" IS NOT NULL OR \"improvement_requests\".\"imported_author_name\" IS NOT NULL))\n      "
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.web_users": {
+      "name": "web_users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "auth_sub": {
+          "name": "auth_sub",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "role": {
+          "name": "role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'MEMBER'"
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "last_login_at": {
+          "name": "last_login_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sessions_valid_from": {
+          "name": "sessions_valid_from",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "is_deleted": {
+          "name": "is_deleted",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_by": {
+          "name": "deleted_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "delete_reason": {
+          "name": "delete_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "web_users_auth_sub_uq": {
+          "name": "web_users_auth_sub_uq",
+          "columns": [
+            {
+              "expression": "auth_sub",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "web_users_alive_idx": {
+          "name": "web_users_alive_idx",
+          "columns": [
+            {
+              "expression": "role",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"web_users\".\"is_deleted\" = false",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.improvement_request_status": {
+      "name": "improvement_request_status",
+      "schema": "public",
+      "values": [
+        "OPEN",
+        "IN_PROGRESS",
+        "RESOLVED"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
