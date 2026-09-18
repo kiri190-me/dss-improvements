@@ -108,7 +108,14 @@
   않는다. 근거는 `src/lib/db/schema.ts` 의 「세션 표는 없다」 절.
 - **물리 삭제를 하지 않는다.** 사람 표는 소프트 삭제 4칼럼 고정.
 - **파일 경로는 상대경로로, 구분자 `/`, 전부 소문자.** 최종 운영은 NAS(Linux) Docker다.
-- **PowerShell 스크립트를 만들지 않는다.** 배치는 TypeScript + tsx.
+- **앱이 도는 곳에서 PowerShell 을 쓰지 않는다.** 자료를 돌리는 배치는 TypeScript +
+  tsx 다 — 최종 운영이 NAS(Linux) Docker 라 거기엔 PowerShell 이 없다.
+  🔴 **개발 PC 를 켜고 끄는 스크립트는 예외다**(`scripts/start-improvements-work.ps1` ·
+  `scripts/end-improvements-work.ps1`). 운영 이미지에 들어가지도, NAS 에서 돌지도
+  않는다. 바탕화면 「작업 시작 / 작업 종료」 메뉴 자체가 PowerShell 이고 나머지 네
+  저장소도 같은 자리에 같은 방식으로 두므로, 이것만 TypeScript 로 만들면 그 체계에서
+  혼자 튄다. (2026-09-18 사용자 결정 — 원래 한 줄이 「PowerShell 스크립트를 만들지
+  않는다」였는데 그 문맥이 앱 배치였다)
 - **마이그레이션 적용·데이터 변경·git push는 사용자 승인 후에** 한다.
 - **주석에 「왜 그렇게 했는가」를 적는다.** 이 회사 저장소들의 특징이고, 실제로
   같은 함정을 두 번 밟지 않게 해 준 장치다.
