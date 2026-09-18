@@ -3,12 +3,13 @@ import type { ReactNode } from "react";
 
 import "./globals.css";
 /*
- * 머리말 위 서비스 오가기 띠(@dss/ui)의 생김새. 그 조각은 CSS 를 스스로 부르지
- * 않는다 — 그러면 번들러 없이는 부를 수 없게 되어 그쪽 시험이 깨진다(그쪽
- * README 3절). 그래서 쓰는 쪽이 한 번 부른다.
+ * 머리말 **안**에 앉는 서비스 오가기 메뉴바(@dss/ui)의 생김새. 그 조각은 CSS 를
+ * 스스로 부르지 않는다 — 그러면 번들러 없이는 부를 수 없게 되어 그쪽 시험이
+ * 깨진다(그쪽 README 3절). 그래서 쓰는 쪽이 한 번 부른다.
  *
- * 규칙은 전부 .dss-menu 아래에만 있고, 띠는 목록이 있을 때만 그려진다
- * ((app)/layout.tsx). 로그인 화면에 이 줄이 닿아도 바뀌는 것은 없다.
+ * 규칙은 전부 .dss-menu 아래에만 있고, 메뉴바는 목록이 있을 때만 그려진다
+ * ((app)/layout.tsx 가 AppHeader 의 serviceMenu 로 내려보낸다). 로그인 화면에
+ * 이 줄이 닿아도 바뀌는 것은 없다.
  */
 import "@dss/ui/styles.css";
 

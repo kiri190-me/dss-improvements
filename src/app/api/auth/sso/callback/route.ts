@@ -97,7 +97,7 @@ export async function GET(request: Request) {
   //  그 자리가 왜 없어졌는지는 db/schema.ts 의 "세션 표는 없다" 절에 있다.)
   await createSession(result.user);
 
-  // 머리말 위 서비스 메뉴바가 그릴 목록 — **세션과 갈라** 따로 굽는다
+  // 머리말 **안**의 서비스 메뉴바가 그릴 목록 — **세션과 갈라** 따로 굽는다
   // (auth/service-menu-cookie.ts 의 파일 주석). 포털이 아직 그 클레임을
   // 싣지 않으면 굽지 않고 남아 있던 것을 지운다. 이 줄이 있으나 없으나
   // 로그인은 똑같이 끝난다 — 목록 때문에 거절되는 길은 만들지 않는다.

@@ -3,7 +3,8 @@
  *
  * 포털(dss-auth)이 로그인 ID 토큰의 `dss_services` 클레임에 「이 사람이 들어갈
  * 수 있는 사내 시스템」을 실어 보낸다. 그 값을 여기서 걸러 서명한 쿠키에
- * 담아 두었다가, (app)/layout.tsx 가 서버에서 풀어 머리말 위의 띠로 그린다.
+ * 담아 두었다가, (app)/layout.tsx 가 서버에서 풀어 **머리말 안**의 메뉴바로
+ * 그린다(AppHeader 의 serviceMenu prop).
  *
  * ── 왜 세션 쿠키(improvements_session)에 넣지 않나 ───────────────────────
  * 세션 토큰에 담긴 값은 인가 판정에 쓰인다(session.ts 의 SessionPayload —
@@ -16,7 +17,7 @@
  * 자기만 속는 일이지만(이 값으로 열리는 권한은 없다) 막는 값이 몇 줄이라
  * 막는 편이 낫다. 비밀값과 수명은 세션 쿠키와 **같은 것**을 쓴다 —
  * AUTH_SESSION_SECRET, env.sessionHours. 수명이 어긋나면 세션은 살아 있는데
- * 띠만 사라지거나 그 반대가 된다.
+ * 메뉴바만 사라지거나 그 반대가 된다.
  *
  * HMAC 을 session.ts 와 나눠 쓰지 않고 여기 한 벌 더 둔 이유는 이 저장소가
  * 이미 그렇게 하고 있어서다 — session.ts 와 oidc.ts 가 같은 모양의 서명을
@@ -26,7 +27,7 @@
  * ── 권한을 판정하지 않는다 ──────────────────────────────────────────────
  * 이 파일은 포털이 준 목록을 **그대로** 나를 뿐, 무엇을 더하거나 빼지 않는다
  * (@dss/ui 의 normalizeServiceMenu 도 그릴 수 없는 칸만 버린다). 판정이 두
- * 벌이 되면 포털 타일(/apps)과 이 띠가 서로 다른 말을 하게 된다.
+ * 벌이 되면 포털 타일(/apps)과 이 메뉴바가 서로 다른 말을 하게 된다.
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 
@@ -60,9 +61,9 @@ function sign(payloadBase64: string): string {
  *
  * 🔴 **그릴 것이 없으면 null 이다 — 쿠키를 굽지 않는다.** 포털의 그 기능은
  * 아직 배포되지 않았으므로 지금 로그인하면 클레임이 아예 없을 수 있고, 그때
- * 화면은 예전과 한 픽셀도 같아야 한다(빈 띠도 그리지 않는다). 클레임이 없는
- * 것과 값이 이상한 것을 구분하지 않는 이유도 같다 — 어느 쪽이든 그릴 수 있는
- * 칸이 없으면 띠는 없는 것이 맞다.
+ * 머리말은 예전과 같아야 한다(빈 자리도 남기지 않는다). 클레임이 없는 것과
+ * 값이 이상한 것을 구분하지 않는 이유도 같다 — 어느 쪽이든 그릴 수 있는
+ * 칸이 없으면 메뉴바는 없는 것이 맞다.
  */
 export function createServiceMenuToken(claim: unknown): string | null {
   const services = normalizeServiceMenu(claim);
@@ -156,7 +157,7 @@ export async function clearServiceMenuCookie(): Promise<void> {
   });
 }
 
-/** 쿠키가 없거나 못 믿을 것이면 빈 목록 — 그때 띠는 그려지지 않는다. */
+/** 쿠키가 없거나 못 믿을 것이면 빈 목록 — 그때 메뉴바는 그려지지 않는다. */
 export async function readServiceMenu(): Promise<ServiceMenuEntry[]> {
   const token = (await cookies()).get(SERVICE_MENU_COOKIE)?.value;
   if (!token) return [];
