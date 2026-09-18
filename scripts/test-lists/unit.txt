@@ -29,3 +29,5 @@ src/lib/domain/improvement-request-list.test.ts
 src/lib/storage/attachment-storage.test.ts
 src/lib/db/attachment-guard.test.ts
 src/components/improvement-requests/improvement-request-screenshot-files.test.ts
+src/lib/auth/service-menu-cookie.test.ts
+src/lib/auth/service-menu-wiring.test.ts

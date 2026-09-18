@@ -228,6 +228,18 @@ export type SsoIdentity = {
    * 무엇인지 정하는 곳은 sso-login.ts 의 decideRole 한 곳뿐이다.
    */
   role: unknown;
+  /**
+   * 「이 사람이 들어갈 수 있는 사내 시스템 목록」(포털의 dss_services 클레임).
+   * 머리말 위 서비스 메뉴바가 그릴 값이고, **권한 판정에는 쓰지 않는다** —
+   * 이 시스템에 들어올 수 있는지는 위 role 하나로만 정한다.
+   *
+   * role 과 같은 이유로 unknown 이다: 무엇을 그릴 수 있는 값으로 칠지는
+   * service-menu-cookie.ts(와 @dss/ui 의 normalizeServiceMenu) 한 곳이 정한다.
+   *
+   * 🔴 포털의 그 기능은 아직 배포되지 않았다 — 지금은 **없을 수 있고**,
+   * 없어도 로그인은 예전과 똑같이 끝나야 한다(쿠키만 안 구워진다).
+   */
+  services: unknown;
 };
 
 export async function verifyIdToken(
@@ -259,6 +271,10 @@ export async function verifyIdToken(
       name: typeof payload.name === "string" ? payload.name : null,
       email: typeof payload.email === "string" ? payload.email : null,
       role: payload.role,
+      // 위 sub 와 **같은 서명 · 발급자 · 수신자 보증을 받은** payload 에서
+      // 꺼낸다. 검증이 실패하면 아래 catch 로 빠져 null 이 나가므로, 이
+      // 클레임이 검증 없이 밖으로 새어 나갈 길은 없다.
+      services: payload.dss_services,
     };
   } catch (error) {
     console.error("[sso] id_token 검증 실패:", error);
@@ -340,4 +356,16 @@ export function endSessionUrl(): string {
  */
 export function portalAppsUrl(): string {
   return `${env.ssoIssuer}/apps`;
+}
+
+/**
+ * 포털에 등록된 이 시스템의 식별자(= ID 토큰의 aud, dss-improvements).
+ *
+ * 서비스 메뉴바가 「지금 여기」 칸을 눌린 상태로 그리는 데 쓴다. 화면에서
+ * env 를 직접 읽지 않고 이 파일을 거치는 이유는 파일 머리말과 같다 —
+ * 포털과 이야기하는 값은 여기 한 곳에만 둔다. 이름이 아니라 식별자로
+ * 견주는 이유는 @dss/ui 의 types.ts 에 적혀 있다(이름은 사람이 바꾼다).
+ */
+export function thisServiceId(): string {
+  return env.ssoClientId;
 }

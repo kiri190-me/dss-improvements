@@ -16,6 +16,7 @@ import {
   SSO_TX_COOKIE_PATH,
   SSO_TX_MAX_AGE_SECONDS,
 } from "@/lib/auth/oidc";
+import { clearServiceMenuCookie } from "@/lib/auth/service-menu-cookie";
 import { getSessionUser } from "@/lib/auth/session";
 import { env } from "@/lib/env";
 
@@ -26,6 +27,13 @@ export async function GET(request: Request) {
   if (await getSessionUser()) {
     return new Response(null, { status: 303, headers: { Location: returnTo } });
   }
+
+  // 🔴 여기서부터는 **새 사람의 로그인**이다. 앞사람이 남긴 서비스 메뉴 목록을
+  // 지운다 — 안 지우면 공용 PC 에서 앞사람의 시스템 목록이 뒷사람 화면 머리말
+  // 위에 그대로 뜬다. 돌아왔을 때 콜백이 그 사람 것으로 다시 굽는다(없으면
+  // 굽지 않는다). 위의 "이미 들어와 있는 사람" 은 이 줄에 닿지 않는다 —
+  // 그 사람 것은 지울 이유가 없다.
+  await clearServiceMenuCookie();
 
   const { authorizeUrl, transaction } = beginLogin(returnTo);
 

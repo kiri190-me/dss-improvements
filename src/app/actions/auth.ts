@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 
 import { endSessionUrl } from "@/lib/auth/oidc";
+import { clearServiceMenuCookie } from "@/lib/auth/service-menu-cookie";
 import { destroySession } from "@/lib/auth/session";
 
 /**
@@ -22,5 +23,10 @@ export async function logoutAction(): Promise<void> {
   // 세션이 있었는지 확인하지 않는다. 이미 끊긴 사람이 로그아웃을 눌렀을 때
   // 오류를 보여 줄 이유가 없다 — 원하는 결과는 이미 이루어져 있다.
   await destroySession();
+  // 🔴 세션과 함께 서비스 메뉴 목록도 지운다. 남겨 두면 로그아웃한 사람의
+  // 브라우저에 「이 사람이 어떤 시스템을 쓰는지」가 그대로 남고, 공용 PC 에서는
+  // 뒷사람 화면에 그것이 뜬다. 지우는 것은 redirect 앞이어야 한다 — redirect 는
+  // 예외를 던져 이 아래가 돌지 않는다.
+  await clearServiceMenuCookie();
   redirect(endSessionUrl());
 }
