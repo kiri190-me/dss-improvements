@@ -26,3 +26,36 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
+
+/*
+ * 팝업(native `<dialog>` + `showModal()`)을 화면 가운데에 세운다.
+ *
+ * 브라우저 기본 스타일시트는 최상위 레이어에 뜬 `<dialog>` 에 `margin: auto` 를
+ * 걸어 가로·세로 가운데로 보낸다. 그런데 Tailwind 의 preflight 가 전체 선택자로
+ * 모든 요소에 `margin: 0` 을 다시 깔면서 그 `auto` 를 지운다 — 그래서 어두운
+ * 덮개는 화면을 다 덮는데 흰 상자만 왼쪽 위 구석에 붙어 있었다.
+ *
+ * 이 사이트의 팝업은 모두 같은 native `<dialog>` 방식이고(스크린샷 크게 보기 ·
+ * 스크린샷 지우기 확인 · 글 지우기 확인), 셋 다 스스로 margin 을 지정하지 않아
+ * 이 타입 선택자 규칙에 그대로 진다. 그래서 팝업마다 손보지 않고 여기 한 번에
+ * 고친다 — 앞으로 만들 팝업도 따로 할 일이 없다. **이 규칙을 지우면 팝업 전부가
+ * 다시 구석으로 붙는다.**
+ */
+dialog {
+  margin: auto;
+}
+
+/*
+ * 좁은 화면에서 팝업 양옆에 숨 쉴 틈을 준다.
+ *
+ * 팝업들은 저마다 `w-full max-w-md` · `w-full max-w-4xl` 로 너비를 잡는데,
+ * max-width 아래로 내려가면 너비가 정확히 화면의 100% 가 되어 양 끝에 딱 붙는다.
+ * `dialog:modal` 은 유틸리티 클래스 하나(`w-full`)보다 우선순위가 높아서
+ * (타입 선택자 + 의사 클래스 > 클래스 하나) `!important` 없이, 또 개별 컴포넌트를
+ * 건드리지 않고 작은 화면에서만 상자를 조금 좁힌다.
+ */
+@media (max-width: 30rem) {
+  dialog:modal {
+    width: calc(100% - 2rem);
+  }
+}
