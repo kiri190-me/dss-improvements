@@ -5,6 +5,7 @@ import { improvementRequestAttachments, improvementRequests } from "@/lib/db/sch
 import {
   canChangeImprovementRequestStatus,
   canDeleteImprovementRequest,
+  canEditImprovementRequestBody,
   decideImprovementRequestWrite,
   IMPROVEMENT_REQUEST_DELETE_FORBIDDEN_MESSAGE,
   planImprovementRequestStatusChange,
@@ -14,7 +15,7 @@ import { validateImprovementRequestFields } from "@/lib/validation/improvement-r
 
 /**
  * ============================================================================
- * 개선요청 — 적기 · 상태 옮기기
+ * 개선요청 — 적기 · 고치기 · 상태 옮기기
  * ============================================================================
  * 본보기는 A/S 시스템의 db/mutations/improvement-requests.ts 다. 순서가 곧 규칙인
  * 것도 같다:
@@ -83,6 +84,7 @@ const VERSION_CONFLICT_MESSAGE =
   "다른 사람이 이 개선요청을 먼저 바꿨습니다. 새로 불러온 뒤 다시 시도해 주세요.";
 const VALIDATION_MESSAGE = "입력값을 확인해 주세요.";
 const STATUS_FORBIDDEN_MESSAGE = "상태를 바꿀 권한이 없습니다.";
+const EDIT_FORBIDDEN_MESSAGE = "접수 상태인 자기 글만 고칠 수 있습니다.";
 
 function notFound(): ImprovementRequestMutationResult {
   return { ok: false, code: "NOT_FOUND", message: NOT_FOUND_MESSAGE };
@@ -148,6 +150,90 @@ export async function createImprovementRequest(params: {
       .returning({ id: improvementRequests.id, version: improvementRequests.version });
 
     return { ok: true, id: inserted.id, version: inserted.version };
+  });
+}
+
+/**
+ * 글의 **내용**을 고친다 — 접수 상태인 자기 글만(canEditImprovementRequestBody).
+ *
+ * ── 🔴 `canManage` 를 받지 않는다 ───────────────────────────────────────
+ * 관리 권한이 있어도 **남의 글 내용은 못 고친다**(domain 의 규칙 주석: 글은 적은
+ * 사람의 말이다). 인자로 아예 받지 않는 것이 그 규칙을 지키는 가장 싼 방법이다 —
+ * 받아 두면 언젠가 "관리자는 예외"가 한 줄로 끼어든다. 지우기(canManage 를 받는다)와
+ * 다른 점이 여기다.
+ *
+ * ── 여기서 고치는 것은 셋이다 — 본문 · 시스템 · 메뉴 ────────────────────
+ * 이 사이트는 **여러 시스템**의 요청을 받는 곳이고, 적을 때 셋을 다 고르게 한다.
+ * 시스템을 잘못 고른 글에 고칠 길이 없으면 지우고 다시 쓰는 수밖에 없다.
+ * (본보기인 A/S 는 본문·메뉴만 고쳤지만, 거기는 개선요청이 그 시스템 **안의**
+ * 기능이라 「어느 시스템인가」라는 칸 자체가 없었다.) 상태는 여기서 못 바꾼다 —
+ * 그것은 관리자만 하는 별도 기능이다(changeImprovementRequestStatus).
+ *
+ * ── 메뉴는 적을 때와 같은 규칙이다 ─────────────────────────────────────
+ * 「모름 · 해당 없음」(null)으로 둘 수 있다. 적을 때 비워 둘 수 있는 칸을 고칠 때만
+ * 필수로 만들면, 메뉴를 모르고 적은 사람이 본문의 오타 하나를 고치려다 있지도 않은
+ * 메뉴를 골라야 한다. 검증은 적기와 **같은 함수**(validateImprovementRequestFields)가
+ * 하므로 두 길이 갈라지지 않는다.
+ *
+ * 차례는 없음 → 충돌 → 권한이다. 지우기와 같은 이유로 권한을 version 뒤에 본다 —
+ * 판정이 **잠근 행의** status·created_by 를 봐야 하고, 낡은 화면에서 누른 [저장]이
+ * 거절될 때 그 사이 상태가 옮겨졌다면 「권한 없음」보다 「다시 불러오라」가 맞는
+ * 말이기 때문이다.
+ */
+export async function updateImprovementRequestBody(params: {
+  id: string;
+  expectedVersion: number;
+  fields: Record<string, unknown>;
+  actorUserId: string;
+}): Promise<ImprovementRequestMutationResult> {
+  const validation = validateImprovementRequestFields(params.fields);
+  if (!validation.ok) return invalid(validation.fieldErrors);
+  const { body, serviceKey, menuKey } = validation.data;
+
+  return db.transaction(async (tx): Promise<ImprovementRequestMutationResult> => {
+    const now = new Date();
+
+    const current = await lockImprovementRequest(tx, params.id);
+    const gate = decideImprovementRequestWrite({
+      row: current,
+      expectedVersion: params.expectedVersion,
+    });
+    if (gate.kind === "not-found") return notFound();
+    if (gate.kind === "conflict") return conflict();
+    if (!current) return notFound();
+
+    // 🔴 판정의 재료는 **잠근 행**에서만 온다. 화면이 「내 글입니다」라고 말한 값이
+    // 아니다 — created_by 가 null 인 옮겨 온 글이 여기서 걸리는 것도 같은 이유다.
+    if (
+      !canEditImprovementRequestBody({
+        status: current.status,
+        createdBy: current.createdBy,
+        actorUserId: params.actorUserId,
+      })
+    ) {
+      return forbidden(EDIT_FORBIDDEN_MESSAGE);
+    }
+
+    const [updated] = await tx
+      .update(improvementRequests)
+      .set({
+        body,
+        serviceKey,
+        menuKey,
+        version: sql`${improvementRequests.version} + 1`,
+        updatedBy: params.actorUserId,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(improvementRequests.id, params.id),
+          eq(improvementRequests.version, params.expectedVersion)
+        )
+      )
+      .returning({ id: improvementRequests.id, version: improvementRequests.version });
+    if (!updated) return conflict();
+
+    return { ok: true, id: updated.id, version: updated.version };
   });
 }
 

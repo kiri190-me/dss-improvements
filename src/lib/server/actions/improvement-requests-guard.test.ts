@@ -103,6 +103,107 @@ test("🔴 낙관적 잠금이 두 겹이다 — 판정과 조건부 UPDATE", ()
   );
 });
 
+/* ── 고치기 — 접수 상태인 자기 글 ─────────────────────────────────────── */
+
+/**
+ * 한 함수의 글자만 잘라 낸다.
+ *
+ * 🔴 파일 전체를 보면 **옆 함수가 가진 관문이 이 함수를 통과시킨다.** 고치기는
+ * 지우기·상태 옮기기와 규칙이 다른 함수(관리자 예외가 없다)라, 파일 단위로 보는
+ * 시험으로는 「고치기만 뚫린」 상태를 잡지 못한다.
+ */
+function functionSource(source: string, name: string): string {
+  const start = source.indexOf(`export async function ${name}(`);
+  if (start === -1) throw new Error(`${name} 을(를) 찾지 못했습니다`);
+  const next = source.indexOf("\nexport ", start + 1);
+  return next === -1 ? source.slice(start) : source.slice(start, next);
+}
+
+const updateMutationRaw = () => functionSource(mutations, "updateImprovementRequestBody");
+const updateMutationCode = () => codeOnly(updateMutationRaw());
+const updateActionCode = () => codeOnly(functionSource(actions, "updateImprovementRequestAction"));
+
+test("🔴 고치기 판정의 재료는 **잠근 행**에서만 온다", () => {
+  // 화면이 「내 글입니다」라고 말한 값으로 판정하면 관문이 무의미하다. status 와
+  // created_by 는 잠그고 읽은 행(current)의 것이어야 한다 — created_by 가 null 인
+  // 옮겨 온 글이 거절되는 것도 이 한 줄에 달려 있다.
+  const code = updateMutationCode();
+  assert.match(code, /lockImprovementRequest\(\s*tx,\s*params\.id\s*\)/, "행을 잠그지 않습니다");
+  assert.match(
+    code,
+    /canEditImprovementRequestBody\(\{[\s\S]*?status:\s*current\.status[\s\S]*?createdBy:\s*current\.createdBy[\s\S]*?actorUserId:\s*params\.actorUserId[\s\S]*?\}\)/,
+    "고치기 판정을 잠근 행의 값으로 부르지 않습니다",
+  );
+});
+
+test("🔴 관리자여도 남의 글 내용은 못 고친다 — canManage 를 받지도 쓰지도 않는다", () => {
+  // 인자로 받아 두면 언젠가 「관리자는 예외」가 한 줄로 끼어든다. 아예 없으면
+  // 그 줄을 적을 수 없다(domain 의 canEditImprovementRequestBody 주석).
+  assert.ok(
+    !/canManage/.test(updateMutationCode()),
+    "고치기 저장이 관리 권한을 다루고 있습니다 — 관리자도 남의 글 내용은 못 고칩니다",
+  );
+  assert.ok(
+    !/canManage/.test(updateActionCode()),
+    "고치기 액션이 관리 권한을 구하고 있습니다 — 고치기에는 쓰이지 않는 값입니다",
+  );
+});
+
+test("🔴 고치기도 낙관적 잠금이 두 겹이다 — 그 사이 누가 바꿨으면 거절", () => {
+  const code = updateMutationCode();
+  assert.match(code, /decideImprovementRequestWrite\(/, "잠근 행에 대한 판정이 없습니다");
+  assert.match(
+    code,
+    /eq\(improvementRequests\.version,\s*params\.expectedVersion\)/,
+    "조건부 UPDATE 의 WHERE 에 version 이 없습니다",
+  );
+});
+
+test("🔴 고치면 version 이 오르고 updated_by·updated_at 이 채워진다", () => {
+  // 주석을 걷지 않은 글자를 본다 — 템플릿 문자열(sql`…`)이 codeOnly 에서 비워지기 때문.
+  const raw = updateMutationRaw();
+  assert.match(
+    raw,
+    /version:\s*sql`\$\{improvementRequests\.version\}\s*\+\s*1`/,
+    "version 을 올리지 않습니다 — 다음 사람의 낙관적 잠금이 통째로 무의미해집니다",
+  );
+  assert.match(raw, /updatedBy:\s*params\.actorUserId/, "updated_by 를 채우지 않습니다");
+  assert.match(raw, /updatedAt:\s*now/, "updated_at 을 채우지 않습니다");
+});
+
+test("🔴 고치는 것은 본문·시스템·메뉴 셋이고, 상태는 아니다", () => {
+  const code = updateMutationCode();
+  const setBlock = code.slice(code.indexOf(".set({"), code.indexOf(".where("));
+  assert.ok(setBlock.length > 0, "고치기의 UPDATE 를 찾지 못했습니다");
+  for (const field of ["body", "serviceKey", "menuKey"]) {
+    assert.match(setBlock, new RegExp(`\\b${field}\\b`), `${field} 를 고칠 수 없습니다`);
+  }
+  // 상태는 관리자만 옮긴다(changeImprovementRequestStatus). 여기로 새면 작성자가
+  // 자기 글의 상태를 되돌릴 수 있게 된다 — 네 칸(in_progress_*·resolved_*)도
+  // 함께 계산되지 않아 DB CHECK 와 어긋난다.
+  assert.ok(!/\bstatus\b/.test(setBlock), "고치기가 상태 칸을 쓰고 있습니다");
+});
+
+test("🔴 고치기 저장도 입력을 다시 검증한다", () => {
+  assert.match(
+    updateMutationCode(),
+    /validateImprovementRequestFields\(/,
+    "service_key·menu_key 에는 DB CHECK 가 없습니다 — 검증을 건너뛰면 아무 글자나 저장됩니다",
+  );
+});
+
+test("🔴 고치기 액션이 세션과 쓰기 권한을 처음부터 다시 본다", () => {
+  const code = updateActionCode();
+  assert.match(code, /getSessionUser\(\)/, "세션을 읽지 않습니다");
+  assert.match(code, /canWriteImprovementRequests\(\s*actor\.role\s*\)/, "쓰기 관문이 없습니다");
+  assert.match(code, /targetFieldErrors\(input\)/, "id·version 을 보지 않습니다");
+  assert.match(code, /actorUserId:\s*actor\.id/, "작성자 대조에 쓸 id 가 세션에서 오지 않습니다");
+  assert.ok(
+    !/actorUserId:\s*input\./.test(code),
+    "요청 본문의 사용자 id 를 저장에 넘기고 있습니다",
+  );
+});
+
 test("🔴 예상 밖 DB 오류를 통째로 로그하지 않는다 (본문에 PII 가 섞일 수 있다)", () => {
   // drizzle 의 오류 메시지에는 쿼리 인자가, Postgres 의 CHECK 오류 detail 에는
   // 행 전체가 실려 온다. 그대로 console 에 넘기면 본문이 로그에 남는다.

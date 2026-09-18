@@ -9,6 +9,7 @@ import {
   arrangeImprovementRequestList,
   canChangeImprovementRequestScreenshots,
   canDeleteImprovementRequest,
+  canEditImprovementRequestBody,
   countImprovementRequestBodyChars,
   filterImprovementRequests,
   hasImprovementRequestScreenshotRoom,
@@ -22,12 +23,20 @@ import {
   listImprovementRequestServiceFilterOptions,
   type ImprovementRequestStatus,
 } from "@/lib/domain/improvement-request";
-import { listMenusOf, listServices, menuLabel, serviceLabel } from "@/lib/domain/service-catalog";
+import {
+  isMenuKeyOf,
+  isServiceKey,
+  listMenusOf,
+  listServices,
+  menuLabel,
+  serviceLabel,
+} from "@/lib/domain/service-catalog";
 import {
   changeImprovementRequestStatusAction,
   createImprovementRequestAction,
   deleteImprovementRequestAction,
   deleteImprovementRequestAttachmentAction,
+  updateImprovementRequestAction,
   type ImprovementRequestActionResult,
 } from "@/lib/server/actions/improvement-requests";
 import {
@@ -53,7 +62,7 @@ import {
 
 /**
  * ============================================================================
- * 개선 요청 — 적고, 보고, 옮기고, 지운다
+ * 개선 요청 — 적고, 보고, 고치고, 옮기고, 지운다
  * ============================================================================
  *
  * ── 🔴 서비스를 고르면 그 서비스의 메뉴가 나온다 ────────────────────────
@@ -68,9 +77,10 @@ import {
  * filterImprovementRequests 주석에 있다.
  *
  * ── 화면은 규칙을 따로 적지 않는다 ─────────────────────────────────────
- * 누가 어느 글을 지우고 스크린샷을 바꿀 수 있는가는 domain/improvement-request.ts 의
- * canDeleteImprovementRequest · canChangeImprovementRequestScreenshots 를 줄마다
- * 그대로 부른다 — 저장(mutation)이 잠근 행으로 부르는 바로 그 함수다. 여기에 조건을
+ * 누가 어느 글을 고치고 지우고 스크린샷을 바꿀 수 있는가는 domain/improvement-request.ts
+ * 의 canEditImprovementRequestBody · canDeleteImprovementRequest ·
+ * canChangeImprovementRequestScreenshots 를 줄마다 그대로 부른다 — 저장(mutation)이
+ * 잠근 행으로 부르는 바로 그 함수다. 여기에 조건을
  * 따로 적으면 화면은 단추를 열어 주는데 저장이 거절하는 날이 온다. 목록 차례(진행중
  * → 접수 → 해결)도 같은 파일의 arrangeImprovementRequestList 다.
  *
@@ -238,6 +248,17 @@ export function ImprovementRequestsScreen({
     null,
   );
 
+  /* ── 고치기 ────────────────────────────────────────────────────── */
+  /**
+   * 지금 고치는 중인 글. 한 번에 하나만 연다 — 여러 줄을 동시에 열어 두면 어느
+   * 초안이 어느 글의 것인지 사람도 화면도 헷갈린다.
+   */
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editServiceKey, setEditServiceKey] = useState("");
+  const [editMenuKey, setEditMenuKey] = useState<string>(NO_MENU_VALUE);
+  const [editBody, setEditBody] = useState("");
+  const [editFieldErrors, setEditFieldErrors] = useState<Record<string, string>>({});
+
   /* ── 지우기 ────────────────────────────────────────────────────── */
   const [deleteTarget, setDeleteTarget] = useState<ImprovementRequestListItem | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -267,6 +288,11 @@ export function ImprovementRequestsScreen({
   const menus = useMemo(() => listMenusOf(serviceKey), [serviceKey]);
   const bodyChars = countImprovementRequestBodyChars(body);
   const bodyOver = bodyChars > IMPROVEMENT_REQUEST_BODY_MAX_CHARS;
+
+  // 고치기 폼도 같은 짝이다 — 고른 시스템의 메뉴만, 같은 글자 세기로.
+  const editMenus = useMemo(() => listMenusOf(editServiceKey), [editServiceKey]);
+  const editBodyChars = countImprovementRequestBodyChars(editBody);
+  const editBodyOver = editBodyChars > IMPROVEMENT_REQUEST_BODY_MAX_CHARS;
 
   // 거르고 → 차례를 세우고 → 해결된 것을 감춘다. 그래서 「(N건 숨김)」과 빈 목록
   // 안내도 고른 칸 안의 수를 말한다.
@@ -329,6 +355,10 @@ export function ImprovementRequestsScreen({
       if (result.code === "CONFLICT" || result.code === "NOT_FOUND") {
         setNotice(result.code === "CONFLICT" ? CONFLICT_NOTICE : NOT_FOUND_NOTICE);
         setDeleteTarget(null);
+        // 🔴 열려 있던 고치기 폼도 닫는다. 새로 불러온 글은 그 사이 상태가 옮겨졌을
+        // 수도, 내용이 바뀌었을 수도 있는데 폼이 그 위를 덮고 있으면 사람은 무엇이
+        // 바뀌었는지 보지 못한 채 [저장]을 한 번 더 누르게 된다.
+        setEditingId(null);
         router.refresh();
         return;
       }
@@ -421,6 +451,69 @@ export function ImprovementRequestsScreen({
         onFailure: (text, errors) => {
           setFieldErrors(errors);
           setCreateError(text);
+        },
+      },
+    );
+  }
+
+  /**
+   * 고치기 폼을 연다 — 지금 저장돼 있는 값을 그대로 담아서.
+   *
+   * 🔴 목록에서 빠진 시스템·메뉴의 옛 글은 **빈 값으로 연다.** 없는 열쇠를
+   * `<select>` 의 value 로 주면 브라우저가 첫 칸을 고른 것처럼 보여 주는데, 사람은
+   * 자기가 고르지도 않은 시스템으로 글이 옮겨 간 것을 모른 채 저장하게 된다.
+   * 빈 값이면 [저장]이 꺼져 있어 다시 고르게 된다.
+   */
+  function startEdit(item: ImprovementRequestListItem) {
+    const serviceOk = isServiceKey(item.serviceKey);
+    setEditingId(item.id);
+    setEditBody(item.body);
+    setEditServiceKey(serviceOk ? item.serviceKey : "");
+    setEditMenuKey(
+      serviceOk && item.menuKey !== null && isMenuKeyOf(item.serviceKey, item.menuKey)
+        ? item.menuKey
+        : NO_MENU_VALUE,
+    );
+    setEditFieldErrors({});
+    setRowError(item.id, null);
+  }
+
+  function cancelEdit(item: ImprovementRequestListItem) {
+    setEditingId(null);
+    setEditFieldErrors({});
+    setRowError(item.id, null);
+  }
+
+  function onEditServiceChange(next: string) {
+    setEditServiceKey(next);
+    // 새 글과 같은 이유다 — 시스템이 바뀌면 골라 둔 메뉴는 성립하지 않는다.
+    setEditMenuKey(NO_MENU_VALUE);
+    setEditFieldErrors({});
+  }
+
+  /**
+   * 고친 내용을 보낸다. 「접수 상태인 자기 글인가」는 **서버가** 잠근 행으로 다시
+   * 판정한다 — 이 화면이 단추를 그렸다는 사실은 근거가 아니다(파일 머리말).
+   */
+  function saveEdit(item: ImprovementRequestListItem) {
+    setRowError(item.id, null);
+    setEditFieldErrors({});
+    run(
+      `edit:${item.id}`,
+      () =>
+        updateImprovementRequestAction({
+          id: item.id,
+          expectedVersion: item.version,
+          fields: { serviceKey: editServiceKey, menuKey: editMenuKey, body: editBody },
+        }),
+      {
+        onOk: () => {
+          setEditingId(null);
+          setNotice("고쳤습니다.");
+        },
+        onFailure: (text, errors) => {
+          setEditFieldErrors(errors);
+          setRowError(item.id, text);
         },
       },
     );
@@ -744,6 +837,13 @@ export function ImprovementRequestsScreen({
         ) : (
           <ul className="flex flex-col gap-3">
             {rows.map((item) => {
+              const mayEdit =
+                canWrite &&
+                canEditImprovementRequestBody({
+                  status: item.status,
+                  createdBy: item.createdByUserId,
+                  actorUserId: actingUserId,
+                });
               const mayDelete =
                 canWrite &&
                 canDeleteImprovementRequest({
@@ -758,6 +858,7 @@ export function ImprovementRequestsScreen({
                   actorUserId: actingUserId,
                   canManage,
                 });
+              const isEditing = editingId === item.id;
               const rowError = rowErrors[item.id];
               const copyState = copyResult?.id === item.id ? copyResult.state : null;
 
@@ -786,10 +887,117 @@ export function ImprovementRequestsScreen({
                     </span>
                   </div>
 
-                  {/* 줄바꿈을 그대로 보인다. 본문은 자유 입력이라 HTML 로 해석하지 않는다. */}
-                  <p className="mt-2 text-sm break-words whitespace-pre-wrap text-slate-900">
-                    {item.body}
-                  </p>
+                  {isEditing ? (
+                    /*
+                     * 고치기 폼은 **본문이 있던 자리**에 그린다. 팝업으로 띄우지 않는
+                     * 것은, 고치는 사람이 위의 이름표(상태·시스템·메뉴)와 아래의
+                     * 스크린샷을 함께 보면서 고쳐야 하기 때문이다.
+                     */
+                    <div className="mt-2 flex flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <label className="block text-sm">
+                          <span className="text-slate-700">
+                            어느 시스템 <span className="text-red-600">*</span>
+                          </span>
+                          <select
+                            value={editServiceKey}
+                            onChange={(event) => onEditServiceChange(event.target.value)}
+                            disabled={isPending}
+                            className={`mt-1 w-full ${SELECT_CLASS}`}
+                          >
+                            <option value="">— 고르세요 —</option>
+                            {services.map((service) => (
+                              <option key={service.key} value={service.key}>
+                                {service.label}
+                              </option>
+                            ))}
+                          </select>
+                          {editFieldErrors.serviceKey && (
+                            <p className={`mt-1 ${FIELD_ERROR_CLASS}`}>
+                              {editFieldErrors.serviceKey}
+                            </p>
+                          )}
+                        </label>
+
+                        <label className="block text-sm">
+                          <span className="text-slate-700">어느 메뉴 (몰라도 됩니다)</span>
+                          <select
+                            value={editMenuKey}
+                            onChange={(event) => setEditMenuKey(event.target.value)}
+                            disabled={isPending || editMenus.length === 0}
+                            className={`mt-1 w-full ${SELECT_CLASS}`}
+                          >
+                            <option value={NO_MENU_VALUE}>모름 · 해당 없음</option>
+                            {editMenus.map((menu) => (
+                              <option key={menu.key} value={menu.key}>
+                                {menu.label}
+                              </option>
+                            ))}
+                          </select>
+                          {editFieldErrors.menuKey && (
+                            <p className={`mt-1 ${FIELD_ERROR_CLASS}`}>{editFieldErrors.menuKey}</p>
+                          )}
+                        </label>
+                      </div>
+
+                      <label className="block text-sm">
+                        <span className="text-slate-700">
+                          내용 <span className="text-red-600">*</span>
+                        </span>
+                        <textarea
+                          value={editBody}
+                          onChange={(event) => setEditBody(event.target.value)}
+                          disabled={isPending}
+                          rows={4}
+                          aria-invalid={rowError || editBodyOver ? true : undefined}
+                          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                        />
+                        {editFieldErrors.body && (
+                          <p className={`mt-1 ${FIELD_ERROR_CLASS}`}>{editFieldErrors.body}</p>
+                        )}
+                      </label>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span
+                          className={
+                            editBodyOver ? "text-xs text-red-600" : "text-xs text-slate-400"
+                          }
+                        >
+                          <span className="tabular-nums">{editBodyChars}</span> /{" "}
+                          {IMPROVEMENT_REQUEST_BODY_MAX_CHARS}
+                        </span>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => cancelEdit(item)}
+                            disabled={isPending}
+                            className={SMALL_BUTTON_CLASS}
+                          >
+                            취소
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => saveEdit(item)}
+                            disabled={
+                              isPending ||
+                              editServiceKey === "" ||
+                              editBody.trim() === "" ||
+                              editBodyOver
+                            }
+                            aria-busy={pendingKey === `edit:${item.id}`}
+                            className="rounded-md bg-slate-900 px-3 py-1 text-xs text-white hover:bg-slate-700 disabled:bg-slate-300"
+                          >
+                            {pendingKey === `edit:${item.id}` ? "저장 중…" : "저장"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    /* 줄바꿈을 그대로 보인다. 본문은 자유 입력이라 HTML 로 해석하지 않는다. */
+                    <p className="mt-2 text-sm break-words whitespace-pre-wrap text-slate-900">
+                      {item.body}
+                    </p>
+                  )}
 
                   <ImprovementRequestScreenshotStrip
                     improvementRequestId={item.id}
@@ -850,6 +1058,16 @@ export function ImprovementRequestsScreen({
                       >
                         {copyState === "copied" ? "복사했습니다" : "복사"}
                       </button>
+                      {mayEdit && !isEditing && (
+                        <button
+                          type="button"
+                          onClick={() => startEdit(item)}
+                          disabled={isPending}
+                          className={SMALL_BUTTON_CLASS}
+                        >
+                          고치기
+                        </button>
+                      )}
                       {mayDelete && (
                         <button
                           type="button"

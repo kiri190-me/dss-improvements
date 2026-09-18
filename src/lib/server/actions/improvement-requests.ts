@@ -11,6 +11,7 @@ import {
   changeImprovementRequestStatus,
   createImprovementRequest,
   deleteImprovementRequest,
+  updateImprovementRequestBody,
 } from "@/lib/db/mutations/improvement-requests";
 import { softDeleteImprovementRequestAttachment } from "@/lib/db/mutations/improvement-request-attachments";
 import { isImprovementRequestStatus } from "@/lib/domain/improvement-request";
@@ -124,6 +125,31 @@ function logUnexpectedDbError(actionName: string, err: unknown): void {
   console.error(`${actionName}: unexpected DB error`, describeErrorWithoutValues(err));
 }
 
+/**
+ * 「어느 글의 어느 시점인가」 두 값을 본다 — 글 하나를 집는 액션(고치기 · 상태
+ * 옮기기 · 지우기)이 **같은 글자로** 거절하도록 한곳에 둔다. 셋이 따로 적고 있으면
+ * 한 곳만 느슨해지는 날이 온다.
+ *
+ * 오류 문구에 받은 값을 싣지 않는다 — 무엇이 유효한 id 인지 알려 주지 않는다.
+ */
+function targetFieldErrors(input: {
+  id: unknown;
+  expectedVersion: unknown;
+}): Record<string, string> {
+  const fieldErrors: Record<string, string> = {};
+  if (typeof input.id !== "string" || !UUID_PATTERN.test(input.id)) {
+    fieldErrors.id = "개선요청을 확인할 수 없습니다.";
+  }
+  if (
+    typeof input.expectedVersion !== "number" ||
+    !Number.isInteger(input.expectedVersion) ||
+    input.expectedVersion <= 0
+  ) {
+    fieldErrors.expectedVersion = "수정 시점 정보를 확인할 수 없습니다.";
+  }
+  return fieldErrors;
+}
+
 /** 새 글 하나 — 들어온 사람 누구나. */
 export async function createImprovementRequestAction(input: {
   fields: Record<string, unknown>;
@@ -146,6 +172,47 @@ export async function createImprovementRequestAction(input: {
 }
 
 /**
+ * 글의 내용(본문 · 시스템 · 메뉴)을 고친다 — **접수 상태인 자기 글만**.
+ *
+ * 🔴 여기의 관문은 「적을 수 있는 사람인가」까지다. **「이 글을 고칠 수 있는가」는
+ * 여기서 판정하지 않는다** — 그 판정에는 글의 status 와 created_by 가 필요하고, 그
+ * 둘은 잠근 행에서 읽어야 믿을 수 있는 값이다(mutation 이 한다). 화면이 [고치기]
+ * 단추를 그렸다는 사실도, 요청 본문이 「내 글입니다」라고 말하는 것도 근거가 아니다.
+ *
+ * 🔴 **관리 권한을 넘기지 않는다.** 관리자여도 남의 글 내용은 못 고친다는 규칙이라,
+ * 계산해서 안 쓰는 것이 아니라 아예 구하지 않는다(상태 옮기기·지우기와 다른 점).
+ *
+ * `expectedVersion` 은 화면이 들고 있던 값이다. 그 사이 누가 글을 바꿨으면
+ * CONFLICT 로 돌아간다 — 낡은 화면에서 누른 [저장]이 앞사람의 변경을 덮지 않게.
+ */
+export async function updateImprovementRequestAction(input: {
+  id: string;
+  expectedVersion: number;
+  fields: Record<string, unknown>;
+}): Promise<ImprovementRequestActionResult> {
+  const actor = await getSessionUser();
+  if (!actor) return unauthorized();
+  if (!canWriteImprovementRequests(actor.role)) return forbidden();
+
+  const fieldErrors = targetFieldErrors(input);
+  if (Object.keys(fieldErrors).length > 0) return invalid(fieldErrors);
+
+  try {
+    const result = await updateImprovementRequestBody({
+      id: input.id,
+      expectedVersion: input.expectedVersion,
+      fields: input.fields ?? {},
+      actorUserId: actor.id,
+    });
+    if (result.ok) revalidatePath(LIST_PATH);
+    return result;
+  } catch (err) {
+    logUnexpectedDbError("updateImprovementRequestAction", err);
+    return databaseUnavailable();
+  }
+}
+
+/**
  * 상태를 옮긴다 — 관리 권한이 있을 때만.
  *
  * `expectedVersion` 은 화면이 들고 있던 값이다. 그 사이 누가 먼저 옮겼으면
@@ -163,17 +230,7 @@ export async function changeImprovementRequestStatusAction(input: {
   const canManage = canManageImprovementRequests(actor.role);
   if (!canManage) return forbidden();
 
-  const fieldErrors: Record<string, string> = {};
-  if (typeof input.id !== "string" || !UUID_PATTERN.test(input.id)) {
-    fieldErrors.id = "개선요청을 확인할 수 없습니다.";
-  }
-  if (
-    typeof input.expectedVersion !== "number" ||
-    !Number.isInteger(input.expectedVersion) ||
-    input.expectedVersion <= 0
-  ) {
-    fieldErrors.expectedVersion = "수정 시점 정보를 확인할 수 없습니다.";
-  }
+  const fieldErrors = targetFieldErrors(input);
   if (!isImprovementRequestStatus(input.to)) {
     fieldErrors.to = "옮길 상태를 확인할 수 없습니다.";
   }
@@ -217,17 +274,7 @@ export async function deleteImprovementRequestAction(input: {
   // 🔴 살아 있는 계정의 역할에서만 나온다. 화면이 넘긴 값이 아니다.
   const canManage = canManageImprovementRequests(actor.role);
 
-  const fieldErrors: Record<string, string> = {};
-  if (typeof input.id !== "string" || !UUID_PATTERN.test(input.id)) {
-    fieldErrors.id = "개선요청을 확인할 수 없습니다.";
-  }
-  if (
-    typeof input.expectedVersion !== "number" ||
-    !Number.isInteger(input.expectedVersion) ||
-    input.expectedVersion <= 0
-  ) {
-    fieldErrors.expectedVersion = "수정 시점 정보를 확인할 수 없습니다.";
-  }
+  const fieldErrors = targetFieldErrors(input);
   if (Object.keys(fieldErrors).length > 0) return invalid(fieldErrors);
 
   try {
