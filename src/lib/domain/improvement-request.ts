@@ -449,6 +449,19 @@ export type ImprovementRequestFilterOption = {
   label: string;
   /** 이 칸을 고르면 목록에 보일 글의 수(아래 주석의 '건수는 지금 보이는 것만'). */
   count: number;
+  /**
+   * 메뉴 거르개에서만 채운다 — 적기·고치기 폼과 **같은 단**으로 보이게 하려고
+   * 그 메뉴의 대메뉴 여부(`isGroup`)와 소속(`groupKey`)을 그대로 실어 나른다
+   * (service-catalog.ts 의 menuOptionText).
+   *
+   * 🔴 `label` 에 들여쓰기를 미리 섞지 않는다. 이 이름표는 선택칸 말고 다른
+   * 곳에서도 읽히고(시험이 글자로 대조한다), 그리는 일은 화면의 몫이다.
+   *
+   * 「전체 메뉴」·「메뉴 지정 안 함」·「(없어진 메뉴)」는 어느 구획에도 안 든다 —
+   * 그 셋은 메뉴가 아니라 거르개가 만든 칸이다.
+   */
+  isGroup?: true;
+  groupKey?: string;
 };
 
 /** 글 하나가 서비스 거르개의 어느 칸에 들어가는가. */
@@ -569,8 +582,17 @@ export function listImprovementRequestMenuFilterOptions(
     improvementRequestMenuFilterValue(item.serviceKey, item.menuKey),
   );
 
-  const candidates = [
-    ...listMenusOf(options.serviceFilter).map((menu) => ({ value: menu.key, label: menu.label })),
+  // 🔴 대메뉴도 그냥 한 칸이다(service-catalog.ts 의 ServiceMenu.isGroup). 대메뉴로
+  // 적은 글은 **그 칸에서만** 세어진다 — 대메뉴를 고르면 그 아래 소메뉴의 글까지
+  // 함께 나오는 것이 아니다. 그 동작이 필요해지면 사람이 정할 일이라 여기서
+  // 지어내지 않는다.
+  const candidates: Omit<ImprovementRequestFilterOption, "count">[] = [
+    ...listMenusOf(options.serviceFilter).map((menu) => ({
+      value: menu.key,
+      label: menu.label,
+      ...(menu.isGroup ? { isGroup: menu.isGroup } : {}),
+      ...(menu.groupKey ? { groupKey: menu.groupKey } : {}),
+    })),
     { value: IMPROVEMENT_REQUEST_FILTER_NO_MENU, label: NO_MENU_LABEL },
     { value: IMPROVEMENT_REQUEST_FILTER_UNKNOWN, label: UNKNOWN_MENU_LABEL },
   ];

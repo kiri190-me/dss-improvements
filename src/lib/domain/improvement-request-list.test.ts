@@ -354,3 +354,65 @@ test("본문의 줄바꿈은 그대로 붙는다", () => {
     improvementRequestCopyText({ serviceKey: "dss-meters", menuKey: null, body }).endsWith(body),
   );
 });
+
+/* ------------------------------------------------------------------ */
+/* 거르개의 단 — 2026-09-18, 대메뉴                                      */
+/* ------------------------------------------------------------------ */
+
+test("🔴 메뉴 거르개도 대메뉴와 소메뉴를 실어 나른다 — 폼과 같은 단으로 보이게", () => {
+  // 화면이 이 두 칸으로 대메뉴는 굵게, 소메뉴는 한 단 들여쓴다. 이름표에는
+  // 아무것도 섞지 않는다 — 들여쓰기를 label 에 미리 넣으면 다른 곳에서 그 글자가
+  // 따라다닌다(service-catalog.ts 의 menuOptionText 머리말).
+  const items = [
+    entry("h", "OPEN", "2026-09-17T00:00:00.000Z", "rf-service-system", "asOperations"),
+    entry("i", "OPEN", "2026-09-16T00:00:00.000Z", "rf-service-system", "quotes"),
+  ];
+  const options = listImprovementRequestMenuFilterOptions(items, {
+    serviceFilter: "rf-service-system",
+    showResolved: true,
+    selected: IMPROVEMENT_REQUEST_FILTER_ALL,
+  });
+
+  const group = options.find((option) => option.value === "asOperations");
+  assert.ok(group, "대메뉴로 적은 글이 거르개에 나오지 않습니다");
+  assert.equal(group.isGroup, true);
+  assert.equal(group.groupKey, undefined);
+  assert.equal(group.label, "A/S 업무");
+
+  const child = options.find((option) => option.value === "quotes");
+  assert.ok(child);
+  assert.equal(child.groupKey, "poDomestic");
+  assert.equal(child.isGroup, undefined);
+  assert.equal(child.label, "견적서");
+
+  // 「전체 메뉴」는 메뉴가 아니라 거르개가 만든 칸이다 — 어느 단에도 안 든다.
+  const all = options.find((option) => option.value === IMPROVEMENT_REQUEST_FILTER_ALL);
+  assert.ok(all);
+  assert.equal(all.isGroup, undefined);
+  assert.equal(all.groupKey, undefined);
+});
+
+test("🔴 대메뉴로 적은 글은 그 칸에서만 세어진다 — 아래 소메뉴까지 끌어오지 않는다", () => {
+  // 이번 조각에서 일부러 만들지 않은 동작이다. 「대메뉴를 고르면 그 아래 글까지
+  // 함께」가 필요하면 사람이 정할 일이라, 지금은 대메뉴가 그냥 또 하나의 칸이다.
+  const items = [
+    entry("h", "OPEN", "2026-09-17T00:00:00.000Z", "rf-service-system", "asOperations"),
+    entry("i", "OPEN", "2026-09-16T00:00:00.000Z", "rf-service-system", "repairCases"),
+  ];
+  assert.deepEqual(
+    filterImprovementRequests(items, {
+      serviceFilter: "rf-service-system",
+      menuFilter: "asOperations",
+    }).map((row) => row.id),
+    ["h"],
+    "대메뉴 칸이 그 아래 소메뉴의 글까지 끌어왔습니다",
+  );
+
+  const options = listImprovementRequestMenuFilterOptions(items, {
+    serviceFilter: "rf-service-system",
+    showResolved: true,
+    selected: IMPROVEMENT_REQUEST_FILTER_ALL,
+  });
+  assert.equal(options.find((option) => option.value === "asOperations")?.count, 1);
+  assert.equal(options.find((option) => option.value === "repairCases")?.count, 1);
+});

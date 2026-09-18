@@ -104,3 +104,15 @@ test("틀린 칸이 여럿이면 한꺼번에 돌려준다", () => {
   assert.ok(fieldErrors.serviceKey);
   assert.ok(fieldErrors.body);
 });
+
+test("🔴 대메뉴도 저장된다 — 고를 수 있는 값이면 검증이 받아 준다", () => {
+  // 2026-09-18 부터 대메뉴(A/S 사이드바의 구획)도 고를 수 있는 한 칸이다
+  // (service-catalog.ts 의 ServiceMenu.isGroup). 검증은 목록 하나만 보므로
+  // 자동으로 따라오는데, **자동으로 따라오는 것을 못 박아 둔다** — 나중에 여기에
+  // 「대메뉴는 빼고」 같은 갈래가 생기면 화면은 내놓는데 저장이 거절하게 된다.
+  const data = ok({ serviceKey: OK_SERVICE, menuKey: "asOperations", body: "A/S 업무 전반이 느려요" });
+  assert.equal(data.menuKey, "asOperations");
+
+  // 남의 시스템의 대메뉴는 통과하지 못한다 — 보통 메뉴와 같은 규칙이다.
+  assert.ok(errors({ serviceKey: "dss-meters", menuKey: "asOperations", body: "느려요" }).menuKey);
+});

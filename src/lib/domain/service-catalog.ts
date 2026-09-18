@@ -68,10 +68,42 @@ export type ServiceMenu = {
    * 저장되는 값. 그 서비스 **안에서만** 겹치지 않으면 된다 — DB 에는 서비스
    * 열쇠와 함께 담기므로, A/S 의 `users` 와 포털의 `adminUsers` 가 서로를
    * 신경 쓸 일이 없다.
+   *
+   * 🔴 **대메뉴도 같은 이름 공간을 쓴다**(아래 `isGroup`). 저쪽 저장소에서는
+   * 구획(navGroups)과 항목(navItems)이 서로 다른 이름 공간이라 같은 글자를 써도
+   * 됐지만, 여기서는 **한 배열**이라 둘이 섞인다. 그래서 겹치면 안 되고,
+   * service-catalog.test.ts 의 「한 서비스 안의 메뉴 열쇠는 서로 겹치지 않는다」가
+   * 그것을 막는다. (A/S 는 지금 안 겹친다 — 구획 쪽이 일부러 "settings" 대신
+   * "systemSettings" 를 쓴다.)
    */
   key: string;
   /** 사람에게 보이는 이름. 그 시스템의 메뉴 이름표 그대로. */
   label: string;
+  /**
+   * 이 칸이 **대메뉴**(그 시스템 사이드바의 구획 머리)인가.
+   *
+   * ── 🔴 왜 `<optgroup>` 이 아닌가 (2026-09-18, 사용자 지시) ──────────────
+   * 처음에는 구획을 `<optgroup label>` 로 그리려고 했다. 그런데 사용자가
+   * 「그룹 제목도 선택할 수 있게」를 요구했고, `<optgroup>` 의 제목은 **HTML
+   * 규격상 고를 수 없다.** 그래서 대메뉴도 보통 메뉴와 같은 한 줄(`<option>`)로
+   * 그리고, **저장되는 열쇠를 가진다.**
+   *
+   * ── 🔴 열쇠를 다시 짓지 않았다 ────────────────────────────────────────
+   * 아래 A/S 덩이의 대메뉴 열쇠는 RF_Service_System/src/lib/navigation.ts 의
+   * `navGroups` key 그대로다. 이유는 메뉴 열쇠를 그대로 옮겨 적은 것과 같다 —
+   * 저쪽 글을 이리로 옮길 때 대응표가 필요 없어야 하고, 그 표는 틀리면 조용히
+   * 틀린다.
+   */
+  isGroup?: true;
+  /**
+   * 이 메뉴가 **든 대메뉴**의 key. 어느 구획에도 안 든 메뉴(A/S 의 대시보드·
+   * 주간보고)와 대메뉴 자신은 없다.
+   *
+   * 🔴 화면은 이 값으로 한 단 **들여쓴다**. 그리고 같은 대메뉴에 든 메뉴들은
+   * 배열에서 **연이어** 있어야 한다(시험이 단언한다) — 사이에 남이 끼면 선택칸에
+   * 같은 구획이 두 토막으로 보인다.
+   */
+  groupKey?: string;
 };
 
 export type ServiceEntry = {
@@ -115,30 +147,68 @@ export const SERVICE_CATALOG: readonly ServiceEntry[] = [
      * 옮긴다. 그때 그 글의 menu_key 를 **그대로** 이 표의 menu_key 에 넣고 서비스만
      * `rf-service-system` 으로 달면 끝난다 — 열쇠를 새로 지었다면 열 건마다 옛
      * 열쇠를 새 열쇠로 옮기는 대응표가 필요했을 것이고, 그 표는 틀리면 조용히 틀린다.
+     *
+     * ── 🔴 대메뉴 다섯 줄이 2026-09-18 에 **더해졌다** ─────────────────────
+     * 같은 파일의 `navGroups` 에서 key 와 label 을 그대로 옮겨 적었다. 저쪽
+     * 사이드바가 메뉴를 다섯 구획으로 묶는데 여기는 평평해서, 고르는 사람이 어느
+     * 것이 어느 묶음인지 알 수 없었다(사용자 요청).
+     *
+     * 🔴 **기존 스물두 줄은 한 칸도 건드리지 않았다** — 열쇠도 이름도 차례도.
+     * 대메뉴는 사이사이에 끼워 넣은 **새 줄**이고, 걷어내면 예전 목록이 글자
+     * 그대로 나온다(service-catalog.test.ts 가 그것을 단언한다).
+     *
+     * 🔴 대시보드·주간보고에 `groupKey` 가 없는 것은 저쪽에서도 그렇기 때문이다 —
+     * 그 둘은 구획 **위**에 단독으로 서 있다(navigation.ts 의 navGroups 머리말:
+     * 「대시보드는 여전히 단독이다」). 주간보고는 대시보드의 하위메뉴이지 구획이
+     * 아니라서, 여기서도 구획으로 승격시키지 않았다.
      */
     menus: [
+      // 구획 밖. 저쪽 사이드바에서도 구획 위에 단독으로 있다.
       { key: "dashboard", label: "대시보드" },
       { key: "weeklyReport", label: "주간보고" },
-      { key: "repairCases", label: "전체 A/S 현황" },
-      { key: "myActiveWork", label: "내 담당 제품" },
-      { key: "repairCaseNew", label: "A/S 접수" },
-      { key: "customerPortal", label: "고객 안내 현황" },
-      { key: "diagnosisFlowcharts", label: "진단 Flowchart 관리" },
-      { key: "workflows", label: "워크플로 관리" },
-      { key: "excelKyosanIntakeList", label: "일본 본사 Excel 생성" },
-      { key: "kyosanIntakeImport", label: "과거 인수품 가져오기" },
-      { key: "technicalProcedures", label: "기술 작업 절차" },
-      { key: "inventory", label: "재고 관리" },
-      { key: "domesticOrders", label: "내자 정리" },
-      { key: "quotes", label: "견적서" },
-      { key: "repairLabor", label: "작업 비용" },
-      { key: "customers", label: "고객사 관리" },
-      { key: "productModels", label: "제품 모델 관리" },
-      { key: "users", label: "사용자 관리" },
-      { key: "settings", label: "시스템 설정" },
-      { key: "mailSettings", label: "메일 설정" },
-      { key: "improvementRequests", label: "개선 요청" },
-      { key: "developerMode", label: "개발자 모드" },
+
+      { key: "asOperations", label: "A/S 업무", isGroup: true },
+      { key: "repairCases", label: "전체 A/S 현황", groupKey: "asOperations" },
+      { key: "myActiveWork", label: "내 담당 제품", groupKey: "asOperations" },
+      { key: "repairCaseNew", label: "A/S 접수", groupKey: "asOperations" },
+      { key: "customerPortal", label: "고객 안내 현황", groupKey: "asOperations" },
+      { key: "diagnosisFlowcharts", label: "진단 Flowchart 관리", groupKey: "asOperations" },
+      { key: "workflows", label: "워크플로 관리", groupKey: "asOperations" },
+      { key: "excelKyosanIntakeList", label: "일본 본사 Excel 생성", groupKey: "asOperations" },
+      { key: "kyosanIntakeImport", label: "과거 인수품 가져오기", groupKey: "asOperations" },
+
+      { key: "techResources", label: "기술 / 자원", isGroup: true },
+      { key: "technicalProcedures", label: "기술 작업 절차", groupKey: "techResources" },
+      { key: "inventory", label: "재고 관리", groupKey: "techResources" },
+
+      { key: "poDomestic", label: "PO / 내자", isGroup: true },
+      { key: "domesticOrders", label: "내자 정리", groupKey: "poDomestic" },
+      { key: "quotes", label: "견적서", groupKey: "poDomestic" },
+      { key: "repairLabor", label: "작업 비용", groupKey: "poDomestic" },
+
+      { key: "admin", label: "관리", isGroup: true },
+      { key: "customers", label: "고객사 관리", groupKey: "admin" },
+      { key: "productModels", label: "제품 모델 관리", groupKey: "admin" },
+
+      { key: "systemSettings", label: "설정", isGroup: true },
+      { key: "users", label: "사용자 관리", groupKey: "systemSettings" },
+      { key: "settings", label: "시스템 설정", groupKey: "systemSettings" },
+      { key: "mailSettings", label: "메일 설정", groupKey: "systemSettings" },
+      /**
+       * 🔴 **저쪽 navigation.ts 에는 이제 이 줄이 없다.** 개선요청 기능이 A/S 에서
+       * 걷어내져 바로 이 사이트로 떨어져 나왔다(RF_Service_System 커밋 ac22e09,
+       * 2026-09-18). 그래도 **지우지 않는다** — 저쪽에 쌓인 글이 이 열쇠를 달고
+       * 있고, 그 글들이 이리로 넘어올 자리다(위 머리말의 '열 건 이관').
+       *
+       * `groupKey` 를 "systemSettings" 로 둔 것은 걷어내지기 **직전까지** 저쪽
+       * navGroups 의 systemSettings 에 있던 자리 그대로라서다(ac22e09~1 의 그
+       * 줄: users · settings · mailSettings · improvementRequests · developerMode).
+       * 구획을 비워 두면 선택칸에서 이 한 줄만 들여쓰기 없이 튀어나와 「설정」이
+       * 두 토막으로 읽힌다. service-catalog.test.ts 가 이 줄을 저쪽 navGroups
+       * 대조에서 예외로 적어 두고, 예외가 이 하나뿐임을 단언한다.
+       */
+      { key: "improvementRequests", label: "개선 요청", groupKey: "systemSettings" },
+      { key: "developerMode", label: "개발자 모드", groupKey: "systemSettings" },
     ],
   },
   {
@@ -220,6 +290,46 @@ export const SERVICE_CATALOG: readonly ServiceEntry[] = [
 
 /** 메뉴를 고르지 않은 글. DB 의 menu_key 가 NULL 이다. */
 export const NO_MENU_LABEL = "메뉴 지정 안 함";
+
+/* ------------------------------------------------------------------ */
+/* 선택칸 한 줄에 그릴 글자 — 🔴 이것은 **보이기만** 한다                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * ── 🔴 왜 글자로 단을 나누나 ────────────────────────────────────────────
+ * 대메뉴는 **굵게** 그린다(화면이 `<option>` 에 font-weight 를 건다). 그런데
+ * `<option>` 에 건 스타일은 브라우저·운영체제마다 먹는 정도가 다르다 — 굵기를
+ * 통째로 무시하는 환경이 있다. 굵기가 사라져도 세 단이 구분되어야 하므로,
+ * **글자 자체로도** 단을 나눈다.
+ *
+ *   대시보드                 ← 구획 밖 메뉴: 아무것도 안 붙는다
+ *   ■ A/S 업무               ← 대메뉴: 표가 붙는다. 고를 수 있다
+ *      전체 A/S 현황         ← 소메뉴: 한 단 들여쓴다
+ *
+ * 들여쓰기만으로는 모자란다 — 구획 밖 메뉴(대시보드·주간보고)도 들여쓰지 않아서
+ * 대메뉴와 같은 자리에 선다. 그래서 대메뉴에는 표를 하나 더 붙였다.
+ *
+ * ■ 는 CJK 글꼴이면 어디나 있는 글자다(▸ 같은 것은 환경에 따라 네모로 깨진다).
+ *
+ * 🔴 **`label` 을 고쳐서 만들지 않는다.** 이 글자는 선택칸에서만 쓰고, 목록의
+ * 이름표·복사 글(improvement-request.ts)·저장되는 값에는 `label` 이 그대로 간다.
+ */
+export const MENU_GROUP_MARK = "■ ";
+/**
+ * 소메뉴 한 단. 보통 공백은 브라우저가 `<option>` 안에서 접어 버리므로 NBSP 다.
+ * (U+00A0 세 칸 — 위 그림의 「전체 A/S 현황」이 ■ 뒤 글자에 맞춰 선다.)
+ */
+export const MENU_INDENT = "   ";
+
+/** 선택칸 한 줄의 글자. 위 그림의 세 단 그대로. */
+export function menuOptionText(menu: {
+  label: string;
+  isGroup?: true;
+  groupKey?: string;
+}): string {
+  if (menu.isGroup) return `${MENU_GROUP_MARK}${menu.label}`;
+  return menu.groupKey ? `${MENU_INDENT}${menu.label}` : menu.label;
+}
 /** 목록에서 사라진 열쇠를 가진 옛 글(파일 머리말의 '메뉴가 없어지면'). */
 export const UNKNOWN_MENU_LABEL = "(없어진 메뉴)";
 export const UNKNOWN_SERVICE_LABEL = "(없어진 서비스)";

@@ -29,7 +29,9 @@ import {
   listMenusOf,
   listServices,
   menuLabel,
+  menuOptionText,
   serviceLabel,
+  type ServiceMenu,
 } from "@/lib/domain/service-catalog";
 import {
   changeImprovementRequestStatusAction,
@@ -196,6 +198,87 @@ function failureText(result: Extract<ImprovementRequestActionResult, { ok: false
     fieldErrors.id ??
     fieldErrors.expectedVersion ??
     result.message
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* 메뉴 선택칸 — 🔴 **한 곳에만 적는다**                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 대메뉴를 굵게 그리는 스타일.
+ *
+ * 🔴 **이것만으로는 안 된다.** `<option>` 에 건 스타일은 브라우저·운영체제마다
+ * 먹는 정도가 달라서, 굵기를 통째로 무시하는 환경이 있다. 굵기가 사라져도 단이
+ * 구분되도록 **글자 자체**로도 나눈다 — 대메뉴에는 표(■)가 붙고 소메뉴는 한 단
+ * 들여쓴다(service-catalog.ts 의 menuOptionText 머리말에 그림이 있다).
+ */
+const MENU_GROUP_OPTION_STYLE = { fontWeight: 700 } as const;
+
+/**
+ * 선택칸 한 줄. 대메뉴·소메뉴·구획 밖 메뉴가 모두 이 한 줄로 그려진다.
+ *
+ * 🔴 **대메뉴도 고를 수 있다**(2026-09-18 사용자 지시). 그래서 `<optgroup>` 을
+ * 쓰지 않았다 — 그 제목은 HTML 규격상 고를 수 없다. 자세한 근거는
+ * service-catalog.ts 의 ServiceMenu.isGroup 주석에 있다.
+ *
+ * `value` 는 언제나 `menu.key` 다. 들여쓰기와 표는 **보이는 글자에만** 붙으므로
+ * 저장되는 값에 섞여 들어가지 않는다.
+ */
+function MenuOption({ menu, suffix }: { menu: ServiceMenu; suffix?: string }) {
+  return (
+    <option value={menu.key} style={menu.isGroup ? MENU_GROUP_OPTION_STYLE : undefined}>
+      {menuOptionText(menu)}
+      {suffix}
+    </option>
+  );
+}
+
+/**
+ * 「어느 메뉴」 칸 — **적기 폼과 고치기 폼이 이것 하나를 쓴다.**
+ *
+ * 🔴 두 폼에 같은 `<select>` 를 두 벌 적어 두면, 다음에 단 나누는 방식이 바뀔 때
+ * 한 곳을 빠뜨린다. 실제로 이 칸은 한 번에 세 군데(적기·고치기·거르개)를 고쳐야
+ * 하는 자리였다.
+ *
+ * 목록 위 **거르개는 합치지 않았다.** 그쪽은 고르는 칸이 아니라 **세는 칸**이다 —
+ * 값이 메뉴 열쇠가 아닌 것이 셋 있고(`@all`·`@none`·`@unknown`), 글이 있는 메뉴만
+ * 나오며, 칸마다 건수가 붙는다. 억지로 한 함수에 밀어 넣으면 인자로 갈래를 타는
+ * 모양이 되어 읽기 어려워진다. 대신 **그리는 규칙은 나누지 않았다** — 거르개도
+ * 같은 `MenuOption` 을 쓴다.
+ */
+function MenuSelectField({
+  value,
+  onChange,
+  menus,
+  disabled,
+  error,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  menus: readonly ServiceMenu[];
+  disabled: boolean;
+  error?: string;
+}) {
+  return (
+    <label className="block text-sm">
+      <span className="text-slate-700">어느 메뉴 (몰라도 됩니다)</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        // 서비스를 아직 안 골랐거나 메뉴가 없는 서비스면 고를 것이 없다.
+        // 감추지 않는 것은, 칸이 사라졌다 나타나면 폼의 높이가 흔들려
+        // 누르려던 단추가 움직이기 때문이다.
+        disabled={disabled || menus.length === 0}
+        className={`mt-1 w-full ${SELECT_CLASS}`}
+      >
+        <option value={NO_MENU_VALUE}>모름 · 해당 없음</option>
+        {menus.map((menu) => (
+          <MenuOption key={menu.key} menu={menu} />
+        ))}
+      </select>
+      {error && <p className={`mt-1 ${FIELD_ERROR_CLASS}`}>{error}</p>}
+    </label>
   );
 }
 
@@ -667,28 +750,13 @@ export function ImprovementRequestsScreen({
               )}
             </label>
 
-            <label className="block text-sm">
-              <span className="text-slate-700">어느 메뉴 (몰라도 됩니다)</span>
-              <select
-                value={menuKey}
-                onChange={(event) => setMenuKey(event.target.value)}
-                // 서비스를 아직 안 골랐거나 메뉴가 없는 서비스면 고를 것이 없다.
-                // 감추지 않는 것은, 칸이 사라졌다 나타나면 폼의 높이가 흔들려
-                // 누르려던 단추가 움직이기 때문이다.
-                disabled={isPending || menus.length === 0}
-                className={`mt-1 w-full ${SELECT_CLASS}`}
-              >
-                <option value={NO_MENU_VALUE}>모름 · 해당 없음</option>
-                {menus.map((menu) => (
-                  <option key={menu.key} value={menu.key}>
-                    {menu.label}
-                  </option>
-                ))}
-              </select>
-              {fieldErrors.menuKey && (
-                <p className={`mt-1 ${FIELD_ERROR_CLASS}`}>{fieldErrors.menuKey}</p>
-              )}
-            </label>
+            <MenuSelectField
+              value={menuKey}
+              onChange={setMenuKey}
+              menus={menus}
+              disabled={isPending}
+              error={fieldErrors.menuKey}
+            />
           </div>
 
           <label className="block text-sm">
@@ -803,10 +871,24 @@ export function ImprovementRequestsScreen({
                 disabled={!isFiltered}
                 className={FILTER_SELECT_CLASS}
               >
+                {/*
+                 * 폼과 **같은 단**으로 보인다 — 대메뉴는 굵게, 소메뉴는 한 단
+                 * 들여쓴다. 그리는 규칙을 여기 따로 적지 않으려고 같은
+                 * MenuOption 을 쓴다(그 머리말에 거르개를 합치지 않은 이유가 있다).
+                 * 값이 메뉴 열쇠가 아닌 칸(전체·지정 안 함·없어진 메뉴)은
+                 * isGroup·groupKey 가 비어 있어서 아무것도 붙지 않는다.
+                 */}
                 {menuFilterOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label} ({option.count})
-                  </option>
+                  <MenuOption
+                    key={option.value}
+                    menu={{
+                      key: option.value,
+                      label: option.label,
+                      isGroup: option.isGroup,
+                      groupKey: option.groupKey,
+                    }}
+                    suffix={` (${option.count})`}
+                  />
                 ))}
               </select>
             </label>
@@ -919,25 +1001,13 @@ export function ImprovementRequestsScreen({
                           )}
                         </label>
 
-                        <label className="block text-sm">
-                          <span className="text-slate-700">어느 메뉴 (몰라도 됩니다)</span>
-                          <select
-                            value={editMenuKey}
-                            onChange={(event) => setEditMenuKey(event.target.value)}
-                            disabled={isPending || editMenus.length === 0}
-                            className={`mt-1 w-full ${SELECT_CLASS}`}
-                          >
-                            <option value={NO_MENU_VALUE}>모름 · 해당 없음</option>
-                            {editMenus.map((menu) => (
-                              <option key={menu.key} value={menu.key}>
-                                {menu.label}
-                              </option>
-                            ))}
-                          </select>
-                          {editFieldErrors.menuKey && (
-                            <p className={`mt-1 ${FIELD_ERROR_CLASS}`}>{editFieldErrors.menuKey}</p>
-                          )}
-                        </label>
+                        <MenuSelectField
+                          value={editMenuKey}
+                          onChange={setEditMenuKey}
+                          menus={editMenus}
+                          disabled={isPending}
+                          error={editFieldErrors.menuKey}
+                        />
                       </div>
 
                       <label className="block text-sm">
