@@ -134,13 +134,13 @@ test("🔴 메뉴바는 머리말 **안**에 앉는다 — 레이아웃이 머�
   // 머리말 **위**의 회색 띠가 아니라 머리말 바탕에 그대로 얹히는 모습이어야 한다.
   assert.match(appLayout.slice(barAt), /variant="inline"/);
 
-  // 🔴 `shrink-0` 은 세로 flex 안에 독립된 띠로 앉을 때의 것이다. 머리말
-  // 안에서는 반대로 **줄어들 수 있어야** 한다(@dss/ui README 3절) — 남으면
-  // 목록이 길어질 때 오른쪽 단추가 화면 밖으로 밀린다.
+  // 🔴 폭을 정하는 장치는 **머리말 쪽의 래퍼 div** 하나다(아래 시험). 여기서
+  // className 을 넘기면 그것은 조각의 <nav> 에 붙는데, 머리말의 flex 항목은
+  // 그 바깥의 래퍼라 아무 일도 하지 않으면서 읽는 사람만 헷갈리게 한다.
   assert.equal(
     appLayout.includes("shrink-0"),
     false,
-    "띠로 앉히던 때의 shrink-0 이 남아 있다 — 머리말 안에서는 줄어들 수 있어야 한다",
+    "폭을 정하는 유틸리티가 두 군데로 갈렸다 — 머리말 쪽 래퍼 하나만 갖는다",
   );
 
   assert.equal(
@@ -175,18 +175,50 @@ test("🔴 머리말이 그리는 자리 — 시스템 이름 다음, 사용자�
   );
 });
 
-test("🔴 폰에서 나가는 단추가 밀려나지 않는다 — 메뉴바는 남는 자리만 쓴다", () => {
-  // `flex-1`(= flex: 1 1 0%)은 기준 폭이 0 이라 이름·사용자명·단추 둘이 제 폭을
-  // 먼저 가져간 **뒤 남은 만큼만** 차지한다. `min-w-0` 은 안의 목록이 길어도 이
-  // 칸이 제 내용 폭까지 부풀지 못하게 막는다(목록은 자기 안에서 굴러간다).
-  // 둘 중 하나라도 빠지면 오른쪽 「로그아웃」부터 화면 밖으로 밀린다.
-  assert.match(appHeaderBare, /<div className="min-w-0 flex-1">\{serviceMenu\}<\/div>/);
+test("🔴 메뉴 단추는 제 폭만 쓰고 이름 옆에 붙어 있는다 — shrink-0 mr-auto", () => {
+  // 🔴 2026-09-18 오후에 `min-w-0 flex-1` 에서 바꿨다. 예전 것은 「**가로로
+  // 늘어선 목록**에 남는 자리를 준다」는 장치였다(기준 폭 0 + 목록이 제 안에서
+  // 굴러가기). 이제 그리는 것은 `white-space: nowrap` 인 **단추 하나**라
+  // 줄어들지 못한다 — 기준 폭 0 인 칸에 두면 자리가 모자랄 때 단추가 칸 밖으로
+  // 삐져나와 사용자명·나가는 단추와 겹친다.
+  //
+  // `mr-auto` 가 짝이다: 이 줄은 justify-between 이라, 가운데 항목이 남는 자리를
+  // 먹지 않게 되면 단추가 줄 한가운데로 밀린다. 자동 여백은 justify-content 보다
+  // 먼저 남는 자리를 가져가므로 단추가 이름 옆에 그대로 붙어 있는다.
+  assert.match(appHeaderBare, /<div className="shrink-0 mr-auto">\{serviceMenu\}<\/div>/);
+
+  // 되돌아가는 것을 막는다 — 단추에는 뜻이 어긋난다.
+  assert.equal(
+    /className="[^"]*\bflex-(1|auto)\b/.test(appHeaderBare),
+    false,
+    "메뉴 칸에 flex-1/flex-auto 가 돌아왔다 — 단추는 줄어들지 못해 글자와 겹친다",
+  );
+
+  // 🔴 폰(360px) 속폭 328 에 들어간다: 단추 59 + gap-4 16 + 나가는 단추 둘 222.
+  //    (이름과 사용자명은 폰에서 sr-only 라 position:absolute — flex 항목에서
+  //     빠지므로 앞뒤 여백까지 함께 사라진다. 아래 시험이 그것을 못 박는다.)
+  const INNER = 360 - 16 * 2;
+  const BUTTON = 24 + 19 + 6 + 8 + 2; // @dss/ui .dss-menu__summary, pointer: coarse
+  const EXITS = 128 + 12 + 82; // 통합 로그인으로 + gap-3 + 로그아웃
+  assert.ok(
+    BUTTON + 16 + EXITS <= INNER,
+    `폰에서 ${BUTTON + 16 + EXITS}px 이라 속폭 ${INNER}px 을 넘는다 — ` +
+      "이 머리말은 flex-wrap 이 없어서 단추 안에서 글자가 접힌다",
+  );
 });
 
-test("🔴 폰에서는 시스템 이름과 사용자명을 **눈에서만** 감춘다 — 그 자리가 메뉴바로 간다", () => {
+test("🔴 폰에서는 시스템 이름과 사용자명을 **눈에서만** 감춘다 — 되돌리면 글자가 접힌다", () => {
   // 360px 속폭 328 에 이름 ~101 · 사용자명 ~96 · 단추 둘 ~210 · 여백 40 이라
-  // 메뉴바를 넣기 전에 이미 넘친다(AppHeader.tsx 머리말의 폭 계산). 글자만
-  // 알려 주는 두 덩이를 감춰야 메뉴바 몫이 생긴다.
+  // 메뉴바를 넣기 전에 이미 넘친다(AppHeader.tsx 머리말의 폭 계산).
+  //
+  // 🔴 2026-09-18 오후, 메뉴바가 드롭다운 단추 하나(59px)가 되면서 이 둘을
+  // 되돌릴 수 있는지 다시 셌다 — **되돌릴 수 없다**:
+  //   사용자명만 되돌려도 오른쪽 묶음이 96 + 12 + 222 = 330 > 328
+  //   이름까지 되돌리면 101 + 16 + 59 + 16 + 222 = 414 > 328
+  // 이 머리말에는 flex-wrap 이 없어서 넘치면 줄이 바뀌는 대신 단추 안에서
+  // 글자가 접힌다("통합 / 로그인으로"). 줄바꿈을 켜면 머리말이 두 줄이 된다.
+  // (계측기 njlee 는 원래 flex-wrap 이고 폰에서 이미 두 줄이라 그쪽은
+  //  시스템 이름을 되돌렸다 — 저장소마다 답이 다른 이유가 이것이다.)
   for (const [what, pattern] of [
     ["시스템 이름", /<h1 className="([^"]*)">\s*DSS 개선요청/],
     ["사용자명", /<span className="([^"]*)">\s*\{user\.displayName\}/],
@@ -213,8 +245,8 @@ test("🔴 폰에서는 시스템 이름과 사용자명을 **눈에서만** 감
 });
 
 test("🔴 나가는 길(통합 로그인으로 · 로그아웃)은 폰에서도 감추지 않는다", () => {
-  // 이 둘 말고 이 사이트를 떠날 길이 없다. 폰에서 가장 넓은 자리를 먹지만
-  // 감추면 나갈 수가 없다 — 메뉴가 굴러가는 편이 낫다.
+  // 이 둘 말고 이 사이트를 떠날 길이 없다. 폰에서 가장 넓은 자리(222px)를
+  // 먹지만 감추면 나갈 수가 없다 — 메뉴가 단추 하나로 줄어든 쪽이 낫다.
   for (const label of ["통합 로그인으로", "로그아웃"] as const) {
     const at = appHeaderBare.indexOf(label);
     assert.ok(at > 0, `머리말에서 「${label}」 이 사라졌다`);
@@ -226,19 +258,67 @@ test("🔴 나가는 길(통합 로그인으로 · 로그아웃)은 폰에서도
   }
 });
 
-test("🔴 폰에서는 칸에서도 이름을 감추고 아이콘만 보인다 — 칸 하나가 아이콘 하나 폭이다", () => {
+test("🔴 폰에서 아이콘만 남는 것은 **단추**다 — 펼친 목록은 이름을 그대로 보인다", () => {
   // 그 동작은 @dss/ui 가 CSS 로 한다(그쪽 시험이 자세히 본다). 여기서는 이
   // 저장소가 기대는 그 규칙이 실제로 실려 있는지만 본다 — 서브모듈 포인터가
-  // 옛 커밋이면 `--inline` 규칙이 통째로 없다.
+  // 옛 커밋이면 드롭다운 규칙이 통째로 없다.
+  //
+  // 🔴 겨냥이 2026-09-18 오후에 바뀌었다. 예전에는 `.dss-menu__name`(= 칸의
+  // 이름)이 폰에서 감춰졌는데, 이제 감추는 것은 `.dss-menu__label`(= **단추**에
+  // 선 이름)이다. `.dss-menu--inline .dss-menu__name` 규칙은 지금도 있지만
+  // 뜻이 전혀 다르다(긴 이름을 … 로 끊는 것) — 그것을 겨냥한 채 두면 시험은
+  // 초록인데 설명은 거짓인 상태가 된다.
   assert.match(menuCss, /\.dss-menu\.dss-menu--inline \{/);
-  assert.match(menuCss, /@media not all and \(min-width: 768px\)/);
-  assert.match(menuCss, /\.dss-menu--inline \.dss-menu__name \{/);
+  assert.match(menuCss, /\.dss-menu--inline \.dss-menu__dropdown \{/);
+  assert.match(menuCss, /\.dss-menu--inline \.dss-menu__summary \{/);
+
+  const phoneBlock = menuCss.match(
+    /@media not all and \(min-width: 768px\) \{([\s\S]*?)\n\}/,
+  );
+  assert.ok(phoneBlock, "폰 기준점(768px) 블록을 찾지 못했다");
+  assert.match(
+    phoneBlock[1],
+    /\.dss-menu--inline \.dss-menu__label \{/,
+    "폰에서 단추의 이름을 감추는 규칙이 없다 — 단추가 이름까지 싣고 자리를 다툰다",
+  );
   // 이름은 눈에서만 감춘다 — 낭독기는 그대로 읽어야 한다.
-  assert.match(menuCss, /clip-path: inset\(50%\)/);
+  assert.match(phoneBlock[1], /clip-path: inset\(50%\)/);
+  // 펼친 목록의 이름은 폰에서도 보인다 — 이모지만 늘어선 목록은 고를 수가 없다.
+  assert.equal(
+    /\.dss-menu__name \{[^}]*clip-path/.test(phoneBlock[1]),
+    false,
+    "펼친 목록의 이름까지 감췄다",
+  );
 });
 
-test("🔴 감추는 기준점이 메뉴바의 「아이콘만」 기준점과 같다 — 둘 다 768px", () => {
-  // 어긋나면 그 사이 폭에서 「이름은 없는데 메뉴는 글자」인 어정쩡한 상태가
+test("🔴 펼친 목록은 머리말 밖으로 **떠서** 그려진다 — 자르는 조상이 없어야 한다", () => {
+  // 목록이 position: absolute 라 머리말 높이를 넘어간다. 감싸는 쪽 어딘가에
+  // overflow: hidden 이 있으면 목록이 잘려 **아무것도 고를 수 없다.**
+  const listRule = menuCss.match(/\.dss-menu--inline \.dss-menu__list \{([\s\S]*?)\n\}/);
+  assert.ok(listRule, "펼친 목록 규칙을 찾지 못했다");
+  assert.match(listRule[1], /position: absolute;/);
+  assert.match(listRule[1], /z-index: 50;/);
+
+  for (const [name, source] of [
+    ["AppHeader.tsx", appHeaderBare],
+    ["(app)/layout.tsx", appLayout],
+    ["layout.tsx", withoutComments(rootLayout)],
+  ] as const) {
+    assert.equal(
+      /\boverflow-hidden\b|\boverflow-(x-|y-)?clip\b/.test(source),
+      false,
+      `${name} 이 overflow 를 자른다 — 펼친 목록이 잘려 고를 수 없게 된다`,
+    );
+  }
+  assert.equal(
+    /\b(html|body)\s*\{[^}]*overflow[^}]*hidden/.test(globalsCss),
+    false,
+    "globals.css 가 html/body 를 잘라 놓았다",
+  );
+});
+
+test("🔴 감추는 기준점이 메뉴 단추의 「아이콘만」 기준점과 같다 — 둘 다 768px", () => {
+  // 어긋나면 그 사이 폭에서 「이름은 없는데 단추는 글자」인 어정쩡한 상태가
   // 생긴다. 머리말 쪽은 Tailwind 의 `md:`(=min-width: 768px), 메뉴바 쪽은 그
   // 여집합인 `not all and (min-width: 768px)` 이라 둘이 정확히 맞물린다.
   const breakpoint = menuCss.match(/@media not all and \(min-width: (\d+)px\)/);
