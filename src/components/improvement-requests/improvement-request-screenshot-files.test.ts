@@ -1,14 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MAX_ATTACHMENT_SIZE_BYTES } from "@/lib/domain/attachment-file";
 import {
+  ATTACHMENT_FILE_ACCEPT,
+  MAX_ATTACHMENT_SIZE_BYTES,
+} from "@/lib/domain/attachment-file";
+import {
+  getOpenFilePicker,
+  isFilePickerAbort,
   isPlaceholderPastedName,
   kstFileStamp,
   nameScreenshotFile,
   pastedScreenshotName,
   pickPastedScreenshots,
   screenshotBatchNotice,
+  screenshotFilePickerOptions,
+  screenshotPickerAccept,
   screenshotUploadUrl,
   screenScreenshotBatch,
   screenshotUrl,
@@ -152,6 +159,59 @@ test("자리표시 이름만 새로 짓는다 — 사람이 붙인 이름은 그
 test("날짜 도장은 KST 다 (자정을 넘는 시각에서 어긋나지 않는다)", () => {
   // UTC 2026-09-16 15:00 = KST 2026-09-17 00:00
   assert.equal(kstFileStamp(new Date("2026-09-16T15:00:00.000Z")), "20260917-000000");
+});
+
+/* ------------------------------------------------------------------ */
+/* 파일 찾기 창                                                          */
+/* ------------------------------------------------------------------ */
+
+test("🔴 창의 형식표는 고르기 칸의 accept 와 같은 형식이다", () => {
+  const accept = screenshotPickerAccept();
+  // 같은 MIME 집합이어야 한다 — 한쪽만 넓히면 창은 보여 주는데 서버가 거절한다.
+  assert.deepEqual(Object.keys(accept).sort(), ATTACHMENT_FILE_ACCEPT.split(",").sort());
+  assert.deepEqual(accept, {
+    "image/png": [".png"],
+    "image/jpeg": [".jpg", ".jpeg"],
+  });
+});
+
+test("🔴 창은 사진 폴더에서 열리고, id 는 주지 않는다", () => {
+  const options = screenshotFilePickerOptions();
+  assert.equal(options.startIn, "pictures");
+  assert.equal(options.multiple, true);
+  // id 를 주면 브라우저가 그 id 의 마지막 폴더를 기억해 startIn 을 무시한다
+  // (규격의 차례와 크로미움 ResolveDefaultDirectory 의 주석 — 구현 파일 머리말).
+  assert.ok(!("id" in options), "id 를 주면 두 번째부터 사진 폴더에서 열리지 않습니다");
+  assert.equal(options.types.length, 1);
+});
+
+test("🔴 API 가 없으면 null 이다 — 부르는 쪽은 지금 쓰는 파일 칸으로 간다", () => {
+  assert.equal(getOpenFilePicker({}), null); // 보안 컨텍스트가 아닌 개발 주소
+  assert.equal(getOpenFilePicker(undefined), null); // 브라우저가 아닌 곳(서버 그리기)
+  assert.equal(getOpenFilePicker(null), null);
+  assert.equal(getOpenFilePicker({ showOpenFilePicker: "열어줘" }), null);
+});
+
+test("🔴 창을 여는 함수는 window 에 묶여 온다 (떼어 부르면 크로미움이 거절한다)", async () => {
+  const fakeWindow = {
+    showOpenFilePicker(this: unknown) {
+      assert.equal(this, fakeWindow, "window 에 묶이지 않은 채 불렸습니다");
+      return Promise.resolve([]);
+    },
+  };
+  const picker = getOpenFilePicker(fakeWindow);
+  assert.notEqual(picker, null);
+  await picker!(screenshotFilePickerOptions());
+});
+
+test("🔴 창을 그냥 닫은 것은 오류가 아니다", () => {
+  const dismissed = new Error("The user aborted a request.");
+  dismissed.name = "AbortError";
+  assert.equal(isFilePickerAbort(dismissed), true);
+  assert.equal(isFilePickerAbort(new Error("네트워크 문제")), false);
+  assert.equal(isFilePickerAbort("AbortError"), false);
+  assert.equal(isFilePickerAbort(null), false);
+  assert.equal(isFilePickerAbort(undefined), false);
 });
 
 /* ------------------------------------------------------------------ */

@@ -1,5 +1,7 @@
 import {
+  ATTACHMENT_EXTENSIONS,
   ATTACHMENT_FORMAT_TEXT,
+  canonicalMimeTypeForExtension,
   checkAttachmentFile,
   formatMegabytes,
   MAX_ATTACHMENT_SIZE_BYTES,
@@ -14,9 +16,9 @@ import {
  * ============================================================================
  * 스크린샷 — 화면이 파일을 고르고 이름 짓고 미리 거르는 순수 도우미
  * ============================================================================
- * DOM 도 fetch 도 만지지 않는다(File 과 DataTransferItem 의 모양만 쓴다) — 시험이
- * 브라우저 없이 전부 돌린다. 올리는 일 자체는 ImprovementRequestScreenshots.tsx 의
- * uploadImprovementRequestScreenshots 가 한다.
+ * DOM 도 fetch 도 만지지 않는다(File · DataTransferItem · window 의 **모양**만 쓴다 —
+ * 전역을 직접 집지 않고 받는다) — 시험이 브라우저 없이 전부 돌린다. 올리는 일 자체는
+ * ImprovementRequestScreenshots.tsx 의 uploadImprovementRequestScreenshots 가 한다.
  *
  * 🔴 **여기의 판정은 편의일 뿐이다.** 형식 · 크기 · 다섯 장은 올리기 통로
  * (api/improvement-requests/[id]/attachments/route.ts)가 다시 본다 — 20MB 를 다
@@ -79,6 +81,125 @@ export function pickPastedScreenshots(items: ArrayLike<ClipboardItemLike>): Scre
     }
   }
   return { images, hasText };
+}
+
+/* ------------------------------------------------------------------ */
+/* 파일 찾기 창을 사진 폴더에서 열기                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 🔴 **고르는 창만 두 갈래다. 고른 뒤는 한 길이다.**
+ *
+ * `<input type="file">` 로는 창이 어느 폴더에서 열릴지 정할 수 없다 — 브라우저는
+ * 「마지막에 쓴 폴더」에서 연다. 그 폴더가 OneDrive 면 목록을 받아오느라 창이 몇 초
+ * 늦게 뜬다. 그래서 창을 여는 일만 showOpenFilePicker 로 바꾸고 사진 폴더를 시작점
+ * 으로 준다(윈도 캡처 도구가 저장하는 자리다).
+ *
+ * 여기 있는 것은 **창을 여는 값과 판정**뿐이다. 고른 파일은 어느 갈래로 왔든 같은
+ * onFiles 로 넘어가 screenScreenshotBatch 를 지난다 — 새 갈래 전용 검사는 없다.
+ * (common/file-drop.ts 머리말의 「떨군 파일도 같은 함수를 지난다」와 같은 규칙이다.)
+ *
+ * ── 🔴 `id` 를 주지 않는 까닭 ───────────────────────────────────────────
+ * 규격의 「창이 열릴 폴더를 정한다」 차례는 이렇다(wicg.github.io/file-system-access,
+ * *determine the directory the picker will start in*):
+ *
+ *   1. startIn 이 손잡이(FileSystemHandle)면 그 폴더
+ *   2. **id 가 비어 있지 않고** 그 id 로 기억해 둔 폴더가 있으면 **그 폴더**
+ *   3. startIn 이 알려진 폴더 이름이면 그 폴더          ← 우리가 타는 자리
+ *   4. id 가 없으면 기억해 둔 마지막 폴더
+ *
+ * 크로미움 구현도 같은 차례다 — content/browser/file_system_access/
+ * file_system_access_manager_impl.cc 의 ResolveDefaultDirectory 에 주석이 그대로
+ * 붙어 있다: `Prioritize an 'id' over a well-known directory.` 그리고
+ * `Prioritize an explicitly stated well-known directory over an implicitly
+ * remembered LastPicked directory.`
+ *
+ * 곧 **id 를 주면 두 번째 고르기부터 startIn 이 무시되고** 마지막 폴더에서 열린다.
+ * 늘 사진 폴더에서 열려야 하므로 id 는 주지 않는다.
+ */
+
+/** showOpenFilePicker 의 `types` 한 칸. TS 의 dom 라이브러리에 이 API 가 없어 직접 적는다. */
+export type FilePickerAcceptType = {
+  description: string;
+  /** MIME → 확장자 목록(점을 붙인다 — 규격이 그 모양을 받는다). */
+  accept: Record<string, string[]>;
+};
+
+export type ScreenshotFilePickerOptions = {
+  multiple: true;
+  startIn: "pictures";
+  types: FilePickerAcceptType[];
+};
+
+/**
+ * 창에 걸 형식표를 도메인 상수에서 **만든다** — MIME 도 확장자도 여기에 새로 적지
+ * 않는다. 재료는 고르기 칸의 accept(ATTACHMENT_FILE_ACCEPT)와 올리기 통로가 보는
+ * 것과 같은 표다. 따로 적으면 창은 보여 주는데 서버가 거절하는 날이 온다.
+ *
+ * → `{ "image/png": [".png"], "image/jpeg": [".jpg", ".jpeg"] }`
+ */
+export function screenshotPickerAccept(): Record<string, string[]> {
+  const accept: Record<string, string[]> = {};
+  for (const extension of ATTACHMENT_EXTENSIONS) {
+    const mimeType = canonicalMimeTypeForExtension(extension);
+    if (mimeType === null) continue;
+    const extensions = accept[mimeType] ?? [];
+    extensions.push(`.${extension}`);
+    accept[mimeType] = extensions;
+  }
+  return accept;
+}
+
+/**
+ * 창을 열 때 주는 값. `excludeAcceptAllOption` 은 주지 않는다 — 지금 고르기 칸의
+ * `accept` 도 「모든 파일」로 바꿀 수 있고, 거기서 이상한 것을 골라도
+ * screenScreenshotBatch 와 서버가 거절한다. 두 갈래를 같게 두는 쪽이 낫다.
+ */
+export function screenshotFilePickerOptions(): ScreenshotFilePickerOptions {
+  return {
+    multiple: true,
+    // 🔴 id 는 주지 않는다(위 머리말). 주는 순간 두 번째부터 사진 폴더가 아니다.
+    startIn: "pictures",
+    types: [{ description: ATTACHMENT_FORMAT_TEXT, accept: screenshotPickerAccept() }],
+  };
+}
+
+/** 고른 결과 — 규격은 File 이 아니라 손잡이를 준다. 쓰는 것만 적는다. */
+export type PickedFileHandle = { getFile(): Promise<File> };
+
+export type OpenFilePicker = (
+  options: ScreenshotFilePickerOptions,
+) => Promise<readonly PickedFileHandle[]>;
+
+/**
+ * 이 브라우저에 새 갈래가 있는가. 있으면 **부를 수 있는 모양으로** 돌려주고, 없으면
+ * null — 부르는 쪽은 null 이면 지금까지의 `<input type="file">` 로 간다.
+ *
+ * 없는 자리가 실제로 있다: 이 API 는 보안 컨텍스트(https · localhost)에만 있고
+ * 크로미움 계열에만 있다. 개발 주소 `http://192.168.x.x:3500` 은 보안 컨텍스트가
+ * 아니라 없다 — 거기서도 스크린샷을 붙일 수 있어야 한다.
+ *
+ * 🔴 window 에 묶어 돌려준다. 떼어 내 부르면 크로미움이 Illegal invocation 을
+ * 던진다(전역 함수를 this 없이 부른 것이 된다).
+ */
+export function getOpenFilePicker(target: unknown): OpenFilePicker | null {
+  if (typeof target !== "object" || target === null) return null;
+  const picker = (target as { showOpenFilePicker?: unknown }).showOpenFilePicker;
+  if (typeof picker !== "function") return null;
+  return (picker as OpenFilePicker).bind(target);
+}
+
+/**
+ * 사람이 창을 그냥 닫았는가. 규격은 이때 `AbortError` 를 던진다 — **오류가 아니다.**
+ * 조용히 아무 일도 없던 것처럼 끝내고 콘솔에도 남기지 않는다(창을 닫은 사람에게
+ * 빨간 줄을 보여 줄 까닭이 없다).
+ *
+ * `instanceof DOMException` 으로 보지 않는 것은 그 이름이 브라우저마다 같지 않을 수
+ * 있어서다 — 규격이 못 박는 것은 `name` 이다.
+ */
+export function isFilePickerAbort(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  return (error as { name?: unknown }).name === "AbortError";
 }
 
 /* ------------------------------------------------------------------ */

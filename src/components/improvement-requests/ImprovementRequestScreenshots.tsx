@@ -9,7 +9,10 @@ import {
 import { hasImprovementRequestScreenshotRoom } from "@/lib/domain/improvement-request";
 import {
   deleteRequestScreenshotNotice,
+  getOpenFilePicker,
+  isFilePickerAbort,
   screenshotCountText,
+  screenshotFilePickerOptions,
   screenshotUploadUrl,
   screenshotUrl,
   type ScreenshotRejection,
@@ -132,8 +135,18 @@ export async function uploadImprovementRequestScreenshots(
 /* ------------------------------------------------------------------ */
 
 /**
- * [스크린샷 추가] — 숨긴 파일 칸을 연다. 고른 뒤 칸을 비워 같은 파일을 다시 고를 수
- * 있게 한다(그러지 않으면 같은 파일을 두 번째 고를 때 change 가 오지 않는다).
+ * [스크린샷 추가] — 파일 찾기 창을 연다.
+ *
+ * ── 🔴 창만 두 갈래, 고른 뒤는 한 길 ────────────────────────────────────
+ * showOpenFilePicker 가 있으면 **사진 폴더에서 시작하는** 창을 연다(그 API 가 없는
+ * `<input type="file">` 은 「마지막에 쓴 폴더」에서 열리고, 그것이 OneDrive 면 창이
+ * 몇 초 늦게 뜬다). 없으면 지금까지처럼 숨긴 파일 칸을 연다 — 개발 주소
+ * `http://192.168.x.x:3500`·파이어폭스·사파리가 그 자리다. 어느 갈래로 골랐든
+ * **같은 onFiles** 로 넘어가 부르는 쪽의 screenScreenshotBatch(형식·크기·다섯 장)를
+ * 지난다. 새 갈래 전용 검사는 없다.
+ *
+ * 숨긴 파일 칸은 고른 뒤 비운다 — 그러지 않으면 같은 파일을 두 번째 고를 때 change 가
+ * 오지 않는다.
  */
 export function ScreenshotAddButton({
   onFiles,
@@ -145,6 +158,28 @@ export function ScreenshotAddButton({
   label?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+
+  async function openPicker() {
+    const picker = getOpenFilePicker(window);
+    if (picker === null) {
+      inputRef.current?.click();
+      return;
+    }
+    try {
+      // 🔴 이 줄 앞에 await 가 있으면 안 된다 — 누름이 준 활성(transient activation)이
+      // 첫 await 를 넘기는 순간 사라져 브라우저가 창을 열어 주지 않는다.
+      const handles = await picker(screenshotFilePickerOptions());
+      const files = await Promise.all(handles.map((handle) => handle.getFile()));
+      if (files.length > 0) onFiles(files);
+    } catch (error) {
+      // 그냥 닫았다 — 아무 일도 없던 것처럼 끝낸다(콘솔에도 남기지 않는다).
+      if (isFilePickerAbort(error)) return;
+      // 그 밖의 탈이면 지금까지의 길로 떨어진다. 활성이 이미 쓰였으면 이 창도 열리지
+      // 않을 수 있지만, 아무것도 하지 않는 것보다는 낫다.
+      inputRef.current?.click();
+    }
+  }
+
   return (
     <>
       <input
@@ -162,7 +197,9 @@ export function ScreenshotAddButton({
       />
       <button
         type="button"
-        onClick={() => inputRef.current?.click()}
+        onClick={() => {
+          void openPicker();
+        }}
         disabled={disabled}
         className={SMALL_BUTTON_CLASS}
       >
