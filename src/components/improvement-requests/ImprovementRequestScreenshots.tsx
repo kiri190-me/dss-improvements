@@ -251,6 +251,12 @@ export function ImprovementRequestScreenshotStrip({
           {screenshots.length > 0 && (
             <span className="tabular-nums">{screenshotCountText(screenshots.length)}</span>
           )}
+          {/*
+            끌어다 놓기는 눈에 보이지 않는다 — 과녁(글 줄 전체)에 평소 표시가 없어
+            한 줄로 알린다. 자리가 찼으면 말하지 않는다: [스크린샷 추가]와 같은
+            조건이라야 「놓으라더니 안 받는다」가 되지 않는다.
+          */}
+          {hasRoom && <span>글 줄 위로 끌어다 놓아도 됩니다</span>}
           {progressText && (
             <span role="status" className="text-slate-700">
               {progressText}

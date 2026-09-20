@@ -41,6 +41,7 @@ import {
   updateImprovementRequestAction,
   type ImprovementRequestActionResult,
 } from "@/lib/server/actions/improvement-requests";
+import { FileDropZone } from "@/components/common/FileDropZone";
 import {
   createdWithScreenshotFailuresText,
   formatScreenshotRejections,
@@ -779,17 +780,36 @@ export function ImprovementRequestsScreen({
             {fieldErrors.body && <p className={`mt-1 ${FIELD_ERROR_CLASS}`}>{fieldErrors.body}</p>}
           </label>
 
-          <StagedScreenshotList staged={staged} disabled={isPending} onRemove={unstageScreenshot} />
+          {/*
+            🔴 떨군 파일도 [스크린샷 추가]·붙여넣기와 **같은** stageScreenshots 를
+            지난다 — 형식·크기·다섯 장 판정(screenScreenshotBatch)이 한 길이어야
+            떨구기로만 이상한 파일이 들어가는 일이 없다. 떨구는 자리 자체는 아무
+            검사도 하지 않는다(components/common/file-drop.ts 머리말).
+          */}
+          <FileDropZone
+            name="새-개선요청-스크린샷"
+            multiple
+            disabled={isPending}
+            hint="여기에 스크린샷을 놓으세요"
+            onFiles={stageScreenshots}
+            className="flex flex-col gap-3 rounded-md border border-dashed border-slate-300 p-2"
+          >
+            <StagedScreenshotList
+              staged={staged}
+              disabled={isPending}
+              onRemove={unstageScreenshot}
+            />
 
-          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-            {hasImprovementRequestScreenshotRoom(staged.length) && (
-              <ScreenshotAddButton onFiles={stageScreenshots} disabled={isPending} />
-            )}
-            <span>
-              <span className="tabular-nums">{screenshotCountText(staged.length)}</span> ·{" "}
-              {SCREENSHOT_HINT_TEXT}
-            </span>
-          </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+              {hasImprovementRequestScreenshotRoom(staged.length) && (
+                <ScreenshotAddButton onFiles={stageScreenshots} disabled={isPending} />
+              )}
+              <span>
+                <span className="tabular-nums">{screenshotCountText(staged.length)}</span> ·{" "}
+                {SCREENSHOT_HINT_TEXT} · 여기로 끌어다 놓아도 됩니다
+              </span>
+            </div>
+          </FileDropZone>
 
           {stagedNotice && (
             <p role="alert" className={FIELD_ERROR_CLASS}>
@@ -946,224 +966,243 @@ export function ImprovementRequestsScreen({
 
               return (
                 <li key={item.id} className="rounded-lg border border-slate-200 bg-white p-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span
-                      className={`rounded border px-1.5 py-0.5 text-xs font-semibold ${STATUS_BADGE[item.status]}`}
-                    >
-                      {IMPROVEMENT_REQUEST_STATUS_LABELS[item.status]}
-                    </span>
-                    <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-xs text-slate-600">
-                      {serviceLabel(item.serviceKey)}
-                    </span>
-                    <span
-                      className={
-                        item.menuKey === null
-                          ? "rounded border border-dashed border-slate-200 px-1.5 py-0.5 text-xs text-slate-400"
-                          : "rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-xs text-slate-600"
-                      }
-                    >
-                      {menuLabel(item.serviceKey, item.menuKey)}
-                    </span>
-                    <span className="text-xs text-slate-500">
-                      {item.createdByName ?? "(알 수 없음)"} · {formatDate(item.createdAt)}
-                    </span>
-                  </div>
+                  {/*
+                    🔴 과녁은 **줄 전체**다. 스크린샷 줄만 감쌌더니 받는 자리가
+                    [스크린샷 추가] 단추 한 줄(26px)뿐이어서, 글 위로 끌어다 놓으면
+                    아무 일도 일어나지 않았다(2026-09-20 눈 확인). 평소 겉모습은 그대로고
+                    끌어오는 중에만 덮개가 뜬다.
 
-                  {isEditing ? (
-                    /*
-                     * 고치기 폼은 **본문이 있던 자리**에 그린다. 팝업으로 띄우지 않는
-                     * 것은, 고치는 사람이 위의 이름표(상태·시스템·메뉴)와 아래의
-                     * 스크린샷을 함께 보면서 고쳐야 하기 때문이다.
-                     */
-                    <div className="mt-2 flex flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-                      <div className="grid gap-3 sm:grid-cols-2">
+                    떨군 파일은 [스크린샷 추가]와 **같은** addRowScreenshots 를 지난다 —
+                    사전 검사도 올리는 길도 하나다. 바꿀 수 없는 줄에서는 꺼 둔다:
+                    단추가 없는 자리에 떨궈 봤자 서버가 거절할 뿐이다. 꺼져 있어도
+                    브라우저가 파일을 여는 것은 막는다(file-drop.ts 의 onDragOver 주석).
+                  */}
+                  <FileDropZone
+                    name="개선요청-줄-스크린샷"
+                    multiple
+                    disabled={isPending || !mayChangeScreenshots}
+                    hint="여기에 스크린샷을 놓으세요 — 이 글에 바로 올라갑니다"
+                    onFiles={(files) => addRowScreenshots(item, files)}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`rounded border px-1.5 py-0.5 text-xs font-semibold ${STATUS_BADGE[item.status]}`}
+                      >
+                        {IMPROVEMENT_REQUEST_STATUS_LABELS[item.status]}
+                      </span>
+                      <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-xs text-slate-600">
+                        {serviceLabel(item.serviceKey)}
+                      </span>
+                      <span
+                        className={
+                          item.menuKey === null
+                            ? "rounded border border-dashed border-slate-200 px-1.5 py-0.5 text-xs text-slate-400"
+                            : "rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-xs text-slate-600"
+                        }
+                      >
+                        {menuLabel(item.serviceKey, item.menuKey)}
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        {item.createdByName ?? "(알 수 없음)"} · {formatDate(item.createdAt)}
+                      </span>
+                    </div>
+
+                    {isEditing ? (
+                      /*
+                       * 고치기 폼은 **본문이 있던 자리**에 그린다. 팝업으로 띄우지 않는
+                       * 것은, 고치는 사람이 위의 이름표(상태·시스템·메뉴)와 아래의
+                       * 스크린샷을 함께 보면서 고쳐야 하기 때문이다.
+                       */
+                      <div className="mt-2 flex flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <label className="block text-sm">
+                            <span className="text-slate-700">
+                              어느 시스템 <span className="text-red-600">*</span>
+                            </span>
+                            <select
+                              value={editServiceKey}
+                              onChange={(event) => onEditServiceChange(event.target.value)}
+                              disabled={isPending}
+                              className={`mt-1 w-full ${SELECT_CLASS}`}
+                            >
+                              <option value="">— 고르세요 —</option>
+                              {services.map((service) => (
+                                <option key={service.key} value={service.key}>
+                                  {service.label}
+                                </option>
+                              ))}
+                            </select>
+                            {editFieldErrors.serviceKey && (
+                              <p className={`mt-1 ${FIELD_ERROR_CLASS}`}>
+                                {editFieldErrors.serviceKey}
+                              </p>
+                            )}
+                          </label>
+
+                          <MenuSelectField
+                            value={editMenuKey}
+                            onChange={setEditMenuKey}
+                            menus={editMenus}
+                            disabled={isPending}
+                            error={editFieldErrors.menuKey}
+                          />
+                        </div>
+
                         <label className="block text-sm">
                           <span className="text-slate-700">
-                            어느 시스템 <span className="text-red-600">*</span>
+                            내용 <span className="text-red-600">*</span>
                           </span>
-                          <select
-                            value={editServiceKey}
-                            onChange={(event) => onEditServiceChange(event.target.value)}
+                          <textarea
+                            value={editBody}
+                            onChange={(event) => setEditBody(event.target.value)}
                             disabled={isPending}
-                            className={`mt-1 w-full ${SELECT_CLASS}`}
-                          >
-                            <option value="">— 고르세요 —</option>
-                            {services.map((service) => (
-                              <option key={service.key} value={service.key}>
-                                {service.label}
-                              </option>
-                            ))}
-                          </select>
-                          {editFieldErrors.serviceKey && (
-                            <p className={`mt-1 ${FIELD_ERROR_CLASS}`}>
-                              {editFieldErrors.serviceKey}
-                            </p>
+                            rows={4}
+                            aria-invalid={rowError || editBodyOver ? true : undefined}
+                            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                          />
+                          {editFieldErrors.body && (
+                            <p className={`mt-1 ${FIELD_ERROR_CLASS}`}>{editFieldErrors.body}</p>
                           )}
                         </label>
 
-                        <MenuSelectField
-                          value={editMenuKey}
-                          onChange={setEditMenuKey}
-                          menus={editMenus}
-                          disabled={isPending}
-                          error={editFieldErrors.menuKey}
-                        />
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span
+                            className={
+                              editBodyOver ? "text-xs text-red-600" : "text-xs text-slate-400"
+                            }
+                          >
+                            <span className="tabular-nums">{editBodyChars}</span> /{" "}
+                            {IMPROVEMENT_REQUEST_BODY_MAX_CHARS}
+                          </span>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => cancelEdit(item)}
+                              disabled={isPending}
+                              className={SMALL_BUTTON_CLASS}
+                            >
+                              취소
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => saveEdit(item)}
+                              disabled={
+                                isPending ||
+                                editServiceKey === "" ||
+                                editBody.trim() === "" ||
+                                editBodyOver
+                              }
+                              aria-busy={pendingKey === `edit:${item.id}`}
+                              className="rounded-md bg-slate-900 px-3 py-1 text-xs text-white hover:bg-slate-700 disabled:bg-slate-300"
+                            >
+                              {pendingKey === `edit:${item.id}` ? "저장 중…" : "저장"}
+                            </button>
+                          </div>
+                        </div>
                       </div>
+                    ) : (
+                      /* 줄바꿈을 그대로 보인다. 본문은 자유 입력이라 HTML 로 해석하지 않는다. */
+                      <p className="mt-2 text-sm break-words whitespace-pre-wrap text-slate-900">
+                        {item.body}
+                      </p>
+                    )}
 
-                      <label className="block text-sm">
-                        <span className="text-slate-700">
-                          내용 <span className="text-red-600">*</span>
-                        </span>
-                        <textarea
-                          value={editBody}
-                          onChange={(event) => setEditBody(event.target.value)}
-                          disabled={isPending}
-                          rows={4}
-                          aria-invalid={rowError || editBodyOver ? true : undefined}
-                          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm"
-                        />
-                        {editFieldErrors.body && (
-                          <p className={`mt-1 ${FIELD_ERROR_CLASS}`}>{editFieldErrors.body}</p>
+                    <ImprovementRequestScreenshotStrip
+                      improvementRequestId={item.id}
+                      screenshots={item.screenshots}
+                      canChange={mayChangeScreenshots}
+                      disabled={isPending}
+                      progressText={rowUpload?.id === item.id ? rowUpload.text : null}
+                      onAddFiles={(files) => addRowScreenshots(item, files)}
+                      onRequestDelete={(screenshot) => {
+                        setRowError(item.id, null);
+                        setScreenshotDeleteTarget({ requestId: item.id, screenshot });
+                      }}
+                    />
+
+                    {(item.inProgressAt || item.resolvedAt) && (
+                      <div className="mt-2 flex flex-col gap-0.5 text-xs text-slate-500">
+                        {item.inProgressAt && (
+                          <span>
+                            진행중 — {item.inProgressByName ?? "알 수 없음"} ·{" "}
+                            {formatDate(item.inProgressAt)}
+                          </span>
                         )}
-                      </label>
+                        {item.resolvedAt && (
+                          <span>
+                            해결 — {item.resolvedByName ?? "알 수 없음"} ·{" "}
+                            {formatDate(item.resolvedAt)}
+                          </span>
+                        )}
+                      </div>
+                    )}
 
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span
-                          className={
-                            editBodyOver ? "text-xs text-red-600" : "text-xs text-slate-400"
-                          }
+                    {/* 단추 줄은 늘 그린다 — [복사]는 보는 권한만 있어도 쓴다. */}
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {canManage && (
+                        <label className="flex items-center gap-1.5 text-xs text-slate-600">
+                          상태
+                          <select
+                            value={item.status}
+                            onChange={(event) => changeStatus(item, event.target.value)}
+                            disabled={isPending}
+                            aria-busy={pendingKey === `status:${item.id}`}
+                            className={FILTER_SELECT_CLASS}
+                          >
+                            {IMPROVEMENT_REQUEST_STATUSES.map((status) => (
+                              <option key={status} value={status}>
+                                {IMPROVEMENT_REQUEST_STATUS_LABELS[status]}
+                              </option>
+                            ))}
+                          </select>
+                          {pendingKey === `status:${item.id}` && <span>옮기는 중…</span>}
+                        </label>
+                      )}
+                      <div className="ml-auto flex flex-wrap justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void copyBody(item)}
+                          className={SMALL_BUTTON_CLASS}
                         >
-                          <span className="tabular-nums">{editBodyChars}</span> /{" "}
-                          {IMPROVEMENT_REQUEST_BODY_MAX_CHARS}
-                        </span>
-                        <div className="flex gap-2">
+                          {copyState === "copied" ? "복사했습니다" : "복사"}
+                        </button>
+                        {mayEdit && !isEditing && (
                           <button
                             type="button"
-                            onClick={() => cancelEdit(item)}
+                            onClick={() => startEdit(item)}
                             disabled={isPending}
                             className={SMALL_BUTTON_CLASS}
                           >
-                            취소
+                            고치기
                           </button>
+                        )}
+                        {mayDelete && (
                           <button
                             type="button"
-                            onClick={() => saveEdit(item)}
-                            disabled={
-                              isPending ||
-                              editServiceKey === "" ||
-                              editBody.trim() === "" ||
-                              editBodyOver
-                            }
-                            aria-busy={pendingKey === `edit:${item.id}`}
-                            className="rounded-md bg-slate-900 px-3 py-1 text-xs text-white hover:bg-slate-700 disabled:bg-slate-300"
+                            onClick={() => {
+                              setDeleteError(null);
+                              setDeleteTarget(item);
+                            }}
+                            disabled={isPending}
+                            className={SMALL_DANGER_BUTTON_CLASS}
                           >
-                            {pendingKey === `edit:${item.id}` ? "저장 중…" : "저장"}
+                            지우기
                           </button>
-                        </div>
+                        )}
                       </div>
                     </div>
-                  ) : (
-                    /* 줄바꿈을 그대로 보인다. 본문은 자유 입력이라 HTML 로 해석하지 않는다. */
-                    <p className="mt-2 text-sm break-words whitespace-pre-wrap text-slate-900">
-                      {item.body}
-                    </p>
-                  )}
 
-                  <ImprovementRequestScreenshotStrip
-                    improvementRequestId={item.id}
-                    screenshots={item.screenshots}
-                    canChange={mayChangeScreenshots}
-                    disabled={isPending}
-                    progressText={rowUpload?.id === item.id ? rowUpload.text : null}
-                    onAddFiles={(files) => addRowScreenshots(item, files)}
-                    onRequestDelete={(screenshot) => {
-                      setRowError(item.id, null);
-                      setScreenshotDeleteTarget({ requestId: item.id, screenshot });
-                    }}
-                  />
-
-                  {(item.inProgressAt || item.resolvedAt) && (
-                    <div className="mt-2 flex flex-col gap-0.5 text-xs text-slate-500">
-                      {item.inProgressAt && (
-                        <span>
-                          진행중 — {item.inProgressByName ?? "알 수 없음"} ·{" "}
-                          {formatDate(item.inProgressAt)}
-                        </span>
-                      )}
-                      {item.resolvedAt && (
-                        <span>
-                          해결 — {item.resolvedByName ?? "알 수 없음"} ·{" "}
-                          {formatDate(item.resolvedAt)}
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  {/* 단추 줄은 늘 그린다 — [복사]는 보는 권한만 있어도 쓴다. */}
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {canManage && (
-                      <label className="flex items-center gap-1.5 text-xs text-slate-600">
-                        상태
-                        <select
-                          value={item.status}
-                          onChange={(event) => changeStatus(item, event.target.value)}
-                          disabled={isPending}
-                          aria-busy={pendingKey === `status:${item.id}`}
-                          className={FILTER_SELECT_CLASS}
-                        >
-                          {IMPROVEMENT_REQUEST_STATUSES.map((status) => (
-                            <option key={status} value={status}>
-                              {IMPROVEMENT_REQUEST_STATUS_LABELS[status]}
-                            </option>
-                          ))}
-                        </select>
-                        {pendingKey === `status:${item.id}` && <span>옮기는 중…</span>}
-                      </label>
+                    {copyState === "failed" && (
+                      <p role="alert" className={`mt-2 ${FIELD_ERROR_CLASS}`}>
+                        {COPY_FAILED_TEXT}
+                      </p>
                     )}
-                    <div className="ml-auto flex flex-wrap justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => void copyBody(item)}
-                        className={SMALL_BUTTON_CLASS}
-                      >
-                        {copyState === "copied" ? "복사했습니다" : "복사"}
-                      </button>
-                      {mayEdit && !isEditing && (
-                        <button
-                          type="button"
-                          onClick={() => startEdit(item)}
-                          disabled={isPending}
-                          className={SMALL_BUTTON_CLASS}
-                        >
-                          고치기
-                        </button>
-                      )}
-                      {mayDelete && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDeleteError(null);
-                            setDeleteTarget(item);
-                          }}
-                          disabled={isPending}
-                          className={SMALL_DANGER_BUTTON_CLASS}
-                        >
-                          지우기
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {copyState === "failed" && (
-                    <p role="alert" className={`mt-2 ${FIELD_ERROR_CLASS}`}>
-                      {COPY_FAILED_TEXT}
-                    </p>
-                  )}
-                  {rowError && (
-                    <p role="alert" className={`mt-2 ${FIELD_ERROR_CLASS}`}>
-                      {rowError}
-                    </p>
-                  )}
+                    {rowError && (
+                      <p role="alert" className={`mt-2 ${FIELD_ERROR_CLASS}`}>
+                        {rowError}
+                      </p>
+                    )}
+                  </FileDropZone>
                 </li>
               );
             })}
