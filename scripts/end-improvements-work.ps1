@@ -214,8 +214,15 @@ if (-not $listener) {
 
 # ── 4. 컨테이너 정지 (자료는 그대로 남는다) ───────────────────────────────
 Write-Step "개선요청 DB 컨테이너 정지"
-$running = (Invoke-Native "docker ps --filter name=^/$Container`$ --format `"{{.Names}}`"").Output
-if ($running -ne $Container) {
+$ps = Invoke-Native "docker ps --filter name=^/$Container`$ --format `"{{.Names}}`""
+if ($ps.ExitCode -ne 0) {
+    # 🔴 docker가 대답하지 않은 것을 "꺼져 있음"으로 읽으면 안 된다 — 모르는 것이다
+    # (2026-09-22). 여태 ExitCode를 버리고 출력 글자만 견주어, docker가 실패하면
+    # 그 오류 글자가 "이름이 다르다" → "이미 꺼져 있음"이 됐다. 2026-09-21에
+    # 이 상자가 docker ps에 보이는데 "이미 꺼져 있음"이라고 넘어간 것이 그 모양이다.
+    Write-Warn2 "docker에 물어보지 못했습니다 — 상자가 켜져 있는지 알 수 없어 그대로 둡니다."
+    if ($ps.Output) { Write-Info $ps.Output }
+} elseif ($ps.Output -ne $Container) {
     Write-Ok "이미 꺼져 있음"
 } elseif ($DryRun) {
     Write-Info "실행할 명령: docker stop $Container"
