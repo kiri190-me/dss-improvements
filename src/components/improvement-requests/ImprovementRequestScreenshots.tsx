@@ -2,7 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import type { ImprovementRequestScreenshot } from "@/lib/db/queries/improvement-request-attachments";
+import type {
+  ImprovementRequestDeletedScreenshot,
+  ImprovementRequestScreenshot,
+} from "@/lib/db/queries/improvement-request-attachments";
 import {
   ATTACHMENT_FILE_ACCEPT,
 } from "@/lib/domain/attachment-file";
@@ -20,7 +23,7 @@ import {
 
 /**
  * ============================================================================
- * 스크린샷 — 올리기 · 썸네일 줄 · 크게 보기 · 지우기 확인 · 등록 전 미리보기
+ * 스크린샷 — 올리기 · 썸네일 줄 · 크게 보기 · 지우기 확인 · 휴지통 · 등록 전 미리보기
  * ============================================================================
  * ImprovementRequestsScreen 이 부르는 조각들이다. 서버 액션을 부르지 않는다 —
  * 지우기는 부르는 쪽이 넘긴 콜백이 한다. 그래서 이 파일은 DB 사슬 없이 그려진다.
@@ -310,6 +313,77 @@ export function ImprovementRequestScreenshotStrip({
         />
       )}
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* 휴지통 — 지운 장과 [되살리기]                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 글 한 줄의 **지운** 스크린샷. 기본은 접혀 있다.
+ *
+ * ── 🔴 왜 접어 두는가 ──────────────────────────────────────────────────
+ * 휴지통은 드물게 쓰는 자리인데 목록은 늘 보인다. 펴 둔 채로 두면 지운 장이 많은
+ * 글일수록 줄이 길어져, 정작 살아 있는 스크린샷이 밀려난다. `<details>` 를 쓰는
+ * 것은 여는 일에 자바스크립트가 필요 없어서다 — 상태를 하나 더 들지 않는다.
+ *
+ * ── 🔴 여기에는 그림이 없다 ────────────────────────────────────────────
+ * 바이트를 여는 통로(api/…/attachments/[attachmentId])는 지워진 첨부를 거절한다.
+ * 그러니 `<img>` 를 그리면 깨진 그림만 남는다. 되살리기 전까지 알아볼 근거는
+ * **이름 · 지운 때**이고, 그것이 맞는 설계다 — 지운 것은 지운 것이다.
+ *
+ * 날짜 글자는 부르는 쪽이 만든다(`formatDate`). KST 로 못 박은 포매터가 화면에
+ * 하나만 있게 하려는 것이다(ImprovementRequestsScreen 의 formatDate).
+ *
+ * 되살리기가 거절될 수 있다는 것을 미리 알린다 — 다섯 장이 차 있으면 서버가
+ * 거절하고, 그 까닭은 줄의 오류 자리에 그대로 보인다(막는 것은 서버다).
+ */
+export function ImprovementRequestScreenshotTrash({
+  screenshots,
+  disabled,
+  restoringId,
+  formatDate,
+  onRestore,
+}: {
+  /** 지워진 장들, 나중에 지운 것부터. 비어 있으면 아무것도 그리지 않는다. */
+  screenshots: readonly ImprovementRequestDeletedScreenshot[];
+  disabled: boolean;
+  /** 지금 되살리는 중인 장의 id. 없으면 null. */
+  restoringId: string | null;
+  formatDate: (iso: string) => string;
+  onRestore: (screenshot: ImprovementRequestDeletedScreenshot) => void;
+}) {
+  if (screenshots.length === 0) return null;
+
+  return (
+    <details className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+      <summary className="cursor-pointer text-xs text-slate-500">
+        휴지통 <span className="tabular-nums">({screenshots.length}장)</span>
+      </summary>
+      <ul className="mt-2 mb-1 flex flex-col gap-1" aria-label="지운 스크린샷">
+        {screenshots.map((shot) => (
+          <li key={shot.id} className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+            <span className="min-w-0 flex-1 truncate" title={shot.originalFileName}>
+              {shot.originalFileName}
+            </span>
+            {shot.deletedAt && (
+              <span className="tabular-nums text-slate-400">{formatDate(shot.deletedAt)} 지움</span>
+            )}
+            <button
+              type="button"
+              onClick={() => onRestore(shot)}
+              disabled={disabled}
+              aria-busy={restoringId === shot.id}
+              aria-label={`${shot.originalFileName} 되살리기`}
+              className={SMALL_BUTTON_CLASS}
+            >
+              {restoringId === shot.id ? "되살리는 중…" : "되살리기"}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 

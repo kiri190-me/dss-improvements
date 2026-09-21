@@ -317,6 +317,56 @@ export function hasImprovementRequestScreenshotRoom(liveCount: number): boolean 
   return liveCount < IMPROVEMENT_REQUEST_SCREENSHOT_MAX_COUNT;
 }
 
+/* ------------------------------------------------------------------ */
+/* 휴지통에서 되살리기                                                   */
+/* ------------------------------------------------------------------ */
+
+export const IMPROVEMENT_REQUEST_SCREENSHOT_RESTORE_LIMIT_MESSAGE = `이미 ${IMPROVEMENT_REQUEST_SCREENSHOT_MAX_COUNT}장이 붙어 있어 되살릴 자리가 없습니다. 한 장을 먼저 지운 뒤에 되살려 주세요.`;
+
+export const IMPROVEMENT_REQUEST_SCREENSHOT_NOT_DELETED_MESSAGE =
+  "지워지지 않은 스크린샷입니다.";
+
+export type ImprovementRequestScreenshotRestoreGate =
+  /** 그 글의 첨부가 아니거나 아예 없다. */
+  | { kind: "not-found" }
+  /** 지워진 적이 없다(또는 그 사이 누가 먼저 되살렸다). 되살릴 것이 없다. */
+  | { kind: "not-deleted" }
+  /** 살아 있는 장이 이미 상한이다. 되살리면 여섯 장이 된다. */
+  | { kind: "limit-reached" }
+  | { kind: "proceed" };
+
+/**
+ * 🔴 **되살리기도 다섯 장을 다시 센다.**
+ *
+ * 되살리기는 「지워진 행의 is_deleted 를 되돌리는 일」이라 붙이기와 같은 결과를
+ * 낳는다 — 살아 있는 장이 한 장 는다. 그래서 붙이기가 보는 것과 **같은 함수**
+ * (hasImprovementRequestScreenshotRoom)로 자리를 본다. 이 검사가 없으면 다섯 장을
+ * 채운 뒤 하나 지웠다 되살리는 것만으로 여섯 장이 된다.
+ *
+ * `liveCount` 는 **되살릴 그 장을 뺀** 지금 살아 있는 수다(되살릴 장은 지워져 있어
+ * 세어지지 않는다). 그래서 상한과 그대로 견주면 된다 — 붙이기와 같은 셈이다.
+ *
+ * 🔴 재료는 **글 행을 잠근 트랜잭션 안에서 읽은 값**이어야 한다. 잠그지 않고 세면
+ * 두 창에서 동시에 되살린 두 장이 둘 다 「네 장뿐」을 보고 들어간다
+ * (db/mutations/improvement-request-attachments.ts 머리말).
+ *
+ * 저장을 하지 않고 이 판정만 따로 뺀 이유는 decideImprovementRequestWrite 와 같다 —
+ * DB 없이 시험할 수 있는 종류의 규칙이기 때문이다.
+ */
+export function decideImprovementRequestScreenshotRestore(input: {
+  /** 잠그고 읽은 첨부 행. 그 글의 것이 아니면 부르는 쪽이 undefined 를 넘긴다. */
+  attachment: { isDeleted: boolean } | undefined;
+  /** 그 글의 **살아 있는** 첨부 수. */
+  liveCount: number;
+}): ImprovementRequestScreenshotRestoreGate {
+  if (!input.attachment) return { kind: "not-found" };
+  // 이미 살아 있는 것을 되살리면 아무 일도 일어나지 않는데 「되살렸다」고 답하게
+  // 된다 — 그 사이 다른 창이 먼저 되살린 경우가 여기다.
+  if (!input.attachment.isDeleted) return { kind: "not-deleted" };
+  if (!hasImprovementRequestScreenshotRoom(input.liveCount)) return { kind: "limit-reached" };
+  return { kind: "proceed" };
+}
+
 /** 앞으로 몇 장을 더 붙일 수 있는가. 음수가 되지 않는다. */
 export function improvementRequestScreenshotRoomLeft(liveCount: number): number {
   return Math.max(0, IMPROVEMENT_REQUEST_SCREENSHOT_MAX_COUNT - liveCount);

@@ -5,6 +5,7 @@ import {
   arrangeImprovementRequestList,
   canChangeImprovementRequestScreenshots,
   canDeleteImprovementRequest,
+  decideImprovementRequestScreenshotRestore,
   filterImprovementRequests,
   hasImprovementRequestScreenshotRoom,
   IMPROVEMENT_REQUEST_FILTER_ALL,
@@ -20,7 +21,7 @@ import {
 
 /**
  * ============================================================================
- * 개선요청 — 지우기 권한 · 다섯 장 · 목록 차례 · 거르기 · 복사
+ * 개선요청 — 지우기 권한 · 다섯 장 · 되살리기 · 목록 차례 · 거르기 · 복사
  * ============================================================================
  * 스크린샷과 함께 들어온 규칙들이다. 상태 옮기기와 낙관적 잠금은
  * improvement-request.test.ts 가 본다.
@@ -107,6 +108,83 @@ test("남은 자리는 음수가 되지 않는다", () => {
   assert.equal(improvementRequestScreenshotRoomLeft(5), 0);
   // 지워 놓고 되살리는 길이 생기면 실제로 6 이 들어올 수 있다.
   assert.equal(improvementRequestScreenshotRoomLeft(6), 0);
+});
+
+/* ------------------------------------------------------------------ */
+/* 휴지통에서 되살리기 (2026-09-21)                                      */
+/* ------------------------------------------------------------------ */
+
+/** 지워진 첨부 한 장 — 판정이 보는 칸은 is_deleted 하나다. */
+const DELETED = { isDeleted: true };
+const LIVE = { isDeleted: false };
+
+test("🔴 지운 첨부는 되살아난다 — 자리가 남아 있으면", () => {
+  // 되살리기가 열리면 저장은 is_deleted 를 내리고(db/attachment-guard.test.ts 가
+  // 그 UPDATE 를 못 박는다), 읽는 쪽은 `is_deleted = false` 인 것만 읽으므로
+  // 그 장은 목록에 다시 나타난다.
+  for (let liveCount = 0; liveCount < IMPROVEMENT_REQUEST_SCREENSHOT_MAX_COUNT; liveCount += 1) {
+    assert.deepEqual(
+      decideImprovementRequestScreenshotRestore({ attachment: DELETED, liveCount }),
+      { kind: "proceed" },
+      `${liveCount}장인데 되살리기가 막혔습니다`,
+    );
+  }
+});
+
+test("🔴 다섯 장이 차 있으면 되살리기가 거절된다 — 지웠다 되살려 여섯 장이 되는 길", () => {
+  // 이 시험이 지키는 것: 다섯 장을 채우고 → 한 장 지우고 → 그 자리에 새로 한 장을
+  // 붙인 뒤(다시 다섯 장) → 지운 장을 되살리는 길. 되살리기가 세지 않으면 여기서
+  // 여섯 장이 된다.
+  assert.deepEqual(
+    decideImprovementRequestScreenshotRestore({
+      attachment: DELETED,
+      liveCount: IMPROVEMENT_REQUEST_SCREENSHOT_MAX_COUNT,
+    }),
+    { kind: "limit-reached" },
+  );
+  // 어쩌다 상한을 넘긴 글에서도 막힌다(옮겨 온 자료 등).
+  assert.deepEqual(
+    decideImprovementRequestScreenshotRestore({
+      attachment: DELETED,
+      liveCount: IMPROVEMENT_REQUEST_SCREENSHOT_MAX_COUNT + 1,
+    }),
+    { kind: "limit-reached" },
+  );
+});
+
+test("🔴 되살리기는 붙이기와 **같은 함수**로 자리를 본다", () => {
+  // 수를 따로 적으면 한쪽만 고치는 날이 온다. 두 판정이 언제나 같은 자리에서
+  // 갈리는지 셈으로 대조한다.
+  for (let liveCount = 0; liveCount <= IMPROVEMENT_REQUEST_SCREENSHOT_MAX_COUNT + 1; liveCount += 1) {
+    const gate = decideImprovementRequestScreenshotRestore({ attachment: DELETED, liveCount });
+    assert.equal(
+      gate.kind === "proceed",
+      hasImprovementRequestScreenshotRoom(liveCount),
+      `${liveCount}장에서 붙이기와 되살리기의 판정이 갈라졌습니다`,
+    );
+  }
+});
+
+test("이미 살아 있는 장과 없는 장은 되살릴 것이 없다", () => {
+  // 그 사이 다른 창이 먼저 되살린 경우가 앞의 것이다 — 「되살렸다」고 답하면
+  // 아무 일도 일어나지 않았는데 성공으로 보인다.
+  assert.deepEqual(
+    decideImprovementRequestScreenshotRestore({ attachment: LIVE, liveCount: 0 }),
+    { kind: "not-deleted" },
+  );
+  assert.deepEqual(
+    decideImprovementRequestScreenshotRestore({ attachment: undefined, liveCount: 0 }),
+    { kind: "not-found" },
+  );
+  // 🔴 없는 첨부는 자리가 차 있어도 「없다」다 — 다섯 장 거절로 답하면 남의 글의
+  // 첨부 id 를 넣어 보고 「그 글이 몇 장인가」를 알아낼 수 있다.
+  assert.deepEqual(
+    decideImprovementRequestScreenshotRestore({
+      attachment: undefined,
+      liveCount: IMPROVEMENT_REQUEST_SCREENSHOT_MAX_COUNT,
+    }),
+    { kind: "not-found" },
+  );
 });
 
 /* ------------------------------------------------------------------ */

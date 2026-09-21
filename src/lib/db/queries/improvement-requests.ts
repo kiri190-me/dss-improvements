@@ -5,7 +5,9 @@ import { db } from "@/lib/db";
 import { improvementRequests, webUsers } from "@/lib/db/schema";
 import type { ImprovementRequestStatus } from "@/lib/domain/improvement-request";
 import {
+  listDeletedScreenshotsByRequestIds,
   listScreenshotsByRequestIds,
+  type ImprovementRequestDeletedScreenshot,
   type ImprovementRequestScreenshot,
 } from "./improvement-request-attachments";
 
@@ -86,6 +88,13 @@ export type ImprovementRequestListItem = {
    * 지워진 것은 들어오지 않는다(queries/improvement-request-attachments.ts).
    */
   screenshots: ImprovementRequestScreenshot[];
+  /**
+   * 이 글에서 **지운** 스크린샷(휴지통), 나중에 지운 것부터.
+   *
+   * 화면은 이것을 접힌 구역에 그리고 [되살리기]를 붙인다. 바이트를 여는 통로는
+   * 지워진 첨부를 거절하므로 그림은 보이지 않는다 — 이름·크기·지운 때뿐이다.
+   */
+  deletedScreenshots: ImprovementRequestDeletedScreenshot[];
 };
 
 function toIsoOrNull(value: Date | null): string | null {
@@ -124,7 +133,14 @@ export async function listImprovementRequests(): Promise<ImprovementRequestListI
   // 스크린샷은 한 번에 읽어 글 id 로 묶는다 — 줄마다 질의하면 글이 서른 건일 때
   // 질의가 서른한 번이 된다(N+1). 조인으로 한 번에 읽지 않는 것은, 글 한 줄이
   // 첨부 수만큼 복제되어 본문(최대 2000자)이 다섯 번 실려 오기 때문이다.
-  const screenshotsByRequest = await listScreenshotsByRequestIds(rows.map((row) => row.id));
+  const requestIds = rows.map((row) => row.id);
+  // 휴지통도 같은 방식으로 한 번에 읽는다(N+1 을 피한다). 살아 있는 것과 한 질의로
+  // 합치지 않는 것은, 「지워진 것을 거르는가」가 조회마다 한눈에 보여야 하기
+  // 때문이다 — 합치면 조건이 인자로 흐른다(첨부 조회 파일 머리말).
+  const [screenshotsByRequest, deletedScreenshotsByRequest] = await Promise.all([
+    listScreenshotsByRequestIds(requestIds),
+    listDeletedScreenshotsByRequestIds(requestIds),
+  ]);
 
   return rows.map(({ authorAccountName, importedAuthorName, ...row }) => ({
     ...row,
@@ -136,5 +152,6 @@ export async function listImprovementRequests(): Promise<ImprovementRequestListI
     resolvedAt: toIsoOrNull(row.resolvedAt),
     updatedAt: row.updatedAt.toISOString(),
     screenshots: screenshotsByRequest.get(row.id) ?? [],
+    deletedScreenshots: deletedScreenshotsByRequest.get(row.id) ?? [],
   }));
 }

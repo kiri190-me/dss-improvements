@@ -13,7 +13,10 @@ import {
   deleteImprovementRequest,
   updateImprovementRequestBody,
 } from "@/lib/db/mutations/improvement-requests";
-import { softDeleteImprovementRequestAttachment } from "@/lib/db/mutations/improvement-request-attachments";
+import {
+  restoreImprovementRequestAttachment,
+  softDeleteImprovementRequestAttachment,
+} from "@/lib/db/mutations/improvement-request-attachments";
 import { isImprovementRequestStatus } from "@/lib/domain/improvement-request";
 
 /**
@@ -297,13 +300,37 @@ export type ImprovementRequestAttachmentActionResult =
   | {
       ok: false;
       /**
-       * LIMIT_REACHED 는 지우기에서 나올 수 없지만 저장(mutation)의 코드 목록을
-       * 그대로 받는다 — 목록이 늘 때 이쪽만 좁혀 두면 컴파일이 조용히 통과하고
-       * 화면이 모르는 코드를 받는다.
+       * ALREADY_DELETED 는 되살리기에서, LIMIT_REACHED·NOT_DELETED 는 지우기에서
+       * 나올 수 없지만 저장(mutation)의 코드 목록을 그대로 받는다 — 목록이 늘 때
+       * 이쪽만 좁혀 두면 컴파일이 조용히 통과하고 화면이 모르는 코드를 받는다.
        */
-      code: ImprovementRequestActionResultCode | "ALREADY_DELETED" | "LIMIT_REACHED";
+      code:
+        | ImprovementRequestActionResultCode
+        | "ALREADY_DELETED"
+        | "LIMIT_REACHED"
+        | "NOT_DELETED";
       message: string;
     };
+
+const ATTACHMENT_NOT_FOUND_MESSAGE = "해당 스크린샷을 찾을 수 없습니다.";
+
+/**
+ * 「어느 글의 어느 첨부인가」 두 값을 본다 — 떼기와 되살리기가 **같은 글자로**
+ * 거절하도록 한곳에 둔다(targetFieldErrors 와 같은 까닭이다).
+ *
+ * 받은 값을 오류 문구에 싣지 않는다 — 무엇이 유효한 id 인지 알려 주지 않는다.
+ */
+function isAttachmentTarget(input: {
+  improvementRequestId: unknown;
+  attachmentId: unknown;
+}): boolean {
+  return (
+    typeof input.improvementRequestId === "string" &&
+    UUID_PATTERN.test(input.improvementRequestId) &&
+    typeof input.attachmentId === "string" &&
+    UUID_PATTERN.test(input.attachmentId)
+  );
+}
 
 /**
  * 스크린샷 한 장을 뗀다 — 소프트 삭제. 글 지우기와 **같은 권한 규칙**이다.
@@ -328,13 +355,8 @@ export async function deleteImprovementRequestAttachmentAction(input: {
 
   const canManage = canManageImprovementRequests(actor.role);
 
-  if (
-    typeof input.improvementRequestId !== "string" ||
-    !UUID_PATTERN.test(input.improvementRequestId) ||
-    typeof input.attachmentId !== "string" ||
-    !UUID_PATTERN.test(input.attachmentId)
-  ) {
-    return { ok: false, code: "NOT_FOUND", message: "해당 스크린샷을 찾을 수 없습니다." };
+  if (!isAttachmentTarget(input)) {
+    return { ok: false, code: "NOT_FOUND", message: ATTACHMENT_NOT_FOUND_MESSAGE };
   }
 
   try {
@@ -351,6 +373,53 @@ export async function deleteImprovementRequestAttachmentAction(input: {
     return { ok: false, code: result.code, message: result.message };
   } catch (err) {
     logUnexpectedDbError("deleteImprovementRequestAttachmentAction", err);
+    return { ok: false, code: "DATABASE_UNAVAILABLE", message: DATABASE_UNAVAILABLE_MESSAGE };
+  }
+}
+
+/**
+ * 휴지통의 스크린샷 한 장을 되살린다 — 떼기의 되돌림.
+ *
+ * 관문도 인자도 떼기와 **같다**(권한 규칙이 같아서다 —
+ * canChangeImprovementRequestScreenshots). 다른 것은 저장이 하는 일 하나뿐이고,
+ * 🔴 **다섯 장을 다시 세는 것도 저장의 몫**이다 — 이 층에서 세지 않는 이유는
+ * 「그 글에 지금 몇 장이 살아 있는가」가 잠근 행 안에서만 믿을 수 있는 값이기
+ * 때문이다(db/mutations/improvement-request-attachments.ts 머리말).
+ *
+ * 화면이 [되살리기] 단추를 그렸다는 사실은 근거가 아니다. 역할은 여기서 살아 있는
+ * 계정으로 다시 구하고, 작성자 대조는 저장이 잠근 행의 created_by 로 한다.
+ */
+export async function restoreImprovementRequestAttachmentAction(input: {
+  improvementRequestId: string;
+  attachmentId: string;
+}): Promise<ImprovementRequestAttachmentActionResult> {
+  const actor = await getSessionUser();
+  if (!actor) return { ok: false, code: "UNAUTHORIZED", message: UNAUTHORIZED_MESSAGE };
+  if (!canWriteImprovementRequests(actor.role)) {
+    return { ok: false, code: "FORBIDDEN", message: FORBIDDEN_MESSAGE };
+  }
+
+  // 🔴 살아 있는 계정의 역할에서만 나온다. 화면이 넘긴 값이 아니다.
+  const canManage = canManageImprovementRequests(actor.role);
+
+  if (!isAttachmentTarget(input)) {
+    return { ok: false, code: "NOT_FOUND", message: ATTACHMENT_NOT_FOUND_MESSAGE };
+  }
+
+  try {
+    const result = await restoreImprovementRequestAttachment({
+      attachmentId: input.attachmentId,
+      improvementRequestId: input.improvementRequestId,
+      actorUserId: actor.id,
+      canManage,
+    });
+    if (result.ok) {
+      revalidatePath(LIST_PATH);
+      return { ok: true, id: result.id };
+    }
+    return { ok: false, code: result.code, message: result.message };
+  } catch (err) {
+    logUnexpectedDbError("restoreImprovementRequestAttachmentAction", err);
     return { ok: false, code: "DATABASE_UNAVAILABLE", message: DATABASE_UNAVAILABLE_MESSAGE };
   }
 }

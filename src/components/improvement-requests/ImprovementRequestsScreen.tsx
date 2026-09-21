@@ -4,7 +4,10 @@ import { useEffect, useMemo, useRef, useState, useTransition, type ClipboardEven
 import { useRouter } from "next/navigation";
 
 import type { ImprovementRequestListItem } from "@/lib/db/queries/improvement-requests";
-import type { ImprovementRequestScreenshot } from "@/lib/db/queries/improvement-request-attachments";
+import type {
+  ImprovementRequestDeletedScreenshot,
+  ImprovementRequestScreenshot,
+} from "@/lib/db/queries/improvement-request-attachments";
 import {
   arrangeImprovementRequestList,
   canChangeImprovementRequestScreenshots,
@@ -38,6 +41,7 @@ import {
   createImprovementRequestAction,
   deleteImprovementRequestAction,
   deleteImprovementRequestAttachmentAction,
+  restoreImprovementRequestAttachmentAction,
   updateImprovementRequestAction,
   type ImprovementRequestActionResult,
 } from "@/lib/server/actions/improvement-requests";
@@ -55,6 +59,7 @@ import {
 } from "./improvement-request-screenshot-files";
 import {
   ImprovementRequestScreenshotStrip,
+  ImprovementRequestScreenshotTrash,
   ScreenshotAddButton,
   ScreenshotDeleteDialog,
   ScreenshotTrashNote,
@@ -99,6 +104,10 @@ import {
  * 요청에 묶지 않으므로 일부만 실패할 수 있고, 그때 글은 **이미 등록된 것**이다
  * (입력칸을 비우고 무엇이 빠졌는지 알린다).
  *
+ * 지운 장은 사라지지 않고 줄의 **휴지통**(접힌 구역)에 남아 [되살리기]로 돌아온다.
+ * 🔴 되살리기도 다섯 장 관문을 지난다 — 화면은 미리 세지 않고 서버가 거절한 까닭을
+ * 그 줄에 적는다(세는 곳은 잠근 트랜잭션 하나여야 한다).
+ *
  * ── 버전 충돌은 덮어쓰지 않는다 ────────────────────────────────────────
  * 그 사이 누가 글을 바꿨으면 서버가 CONFLICT 로 돌려준다. 그때는 다시 보내지 않고
  * 안내한 뒤 `router.refresh()` 로 새로 불러온다 — 낡은 화면에서 누른 조작이 방금
@@ -138,6 +147,9 @@ const CONFLICT_NOTICE =
 const NOT_FOUND_NOTICE = "그 사이 지워진 개선요청입니다. 목록을 새로 불러왔습니다.";
 const COPY_FAILED_TEXT = "복사하지 못했습니다. 글을 직접 선택해 복사해 주세요.";
 const COPY_DONE_MS = 1500;
+
+/** 되살리는 중인 장을 가리키는 pendingKey 의 앞머리. 단추 글자를 바꿀 자리를 고른다. */
+const RESTORE_PENDING_PREFIX = "shot-restore:";
 
 /** 날짜만 그리는 KST 포매터(파일 머리말의 '날짜는 KST 로 못 박는다'). */
 const KST_DATE_FORMATTER = new Intl.DateTimeFormat("ko-KR", {
@@ -702,6 +714,45 @@ export function ImprovementRequestsScreen({
     });
   }
 
+  /**
+   * 휴지통의 한 장을 되살린다.
+   *
+   * 확인창을 두지 않는다 — 지우기와 달리 **되돌릴 수 있는 쪽**으로 가는 조작이고,
+   * 잘못 눌렀으면 그대로 다시 [지우기]를 누르면 된다.
+   *
+   * 🔴 다섯 장이 차 있으면 서버가 거절한다. 화면에서 미리 세어 단추를 끄지 않는
+   * 것은, 이 목록이 그려진 뒤에 다른 창이 한 장을 더 붙였을 수 있기 때문이다 —
+   * 세는 자리는 글 행을 잠근 트랜잭션 하나뿐이고(파일 머리말), 여기서는 거절 문구를
+   * 그 줄에 그대로 적는다.
+   */
+  function restoreScreenshot(
+    item: ImprovementRequestListItem,
+    screenshot: ImprovementRequestDeletedScreenshot,
+  ) {
+    setNotice(null);
+    setRowError(item.id, null);
+    setPendingKey(`${RESTORE_PENDING_PREFIX}${screenshot.id}`);
+    startTransition(async () => {
+      const result = await restoreImprovementRequestAttachmentAction({
+        improvementRequestId: item.id,
+        attachmentId: screenshot.id,
+      });
+      setPendingKey(null);
+      if (result.ok) {
+        router.refresh();
+        return;
+      }
+      if (result.code === "NOT_FOUND" || result.code === "NOT_DELETED") {
+        // 글이 그 사이 지워졌거나, 다른 창이 먼저 되살렸다 — 새로 불러오면 휴지통과
+        // 스크린샷 줄이 지금의 모습으로 다시 그려진다.
+        setNotice(result.message);
+        router.refresh();
+        return;
+      }
+      setRowError(item.id, result.message);
+    });
+  }
+
   /* ── 그리기 ────────────────────────────────────────────────────── */
 
   return (
@@ -1119,6 +1170,26 @@ export function ImprovementRequestsScreen({
                         setScreenshotDeleteTarget({ requestId: item.id, screenshot });
                       }}
                     />
+
+                    {/*
+                      휴지통은 스크린샷을 바꿀 수 있는 사람에게만 보인다 — 되살릴 수
+                      없는 사람에게는 「지운 것이 있다」는 사실만 남아 아무 데도
+                      쓸모가 없다. 단추와 같은 조건이라야 화면이 한 가지 말을 한다.
+                      (막는 것은 서버다 — 이 조건은 단추를 그릴지만 고른다.)
+                    */}
+                    {mayChangeScreenshots && (
+                      <ImprovementRequestScreenshotTrash
+                        screenshots={item.deletedScreenshots}
+                        disabled={isPending}
+                        restoringId={
+                          pendingKey?.startsWith(RESTORE_PENDING_PREFIX)
+                            ? pendingKey.slice(RESTORE_PENDING_PREFIX.length)
+                            : null
+                        }
+                        formatDate={formatDate}
+                        onRestore={(screenshot) => restoreScreenshot(item, screenshot)}
+                      />
+                    )}
 
                     {(item.inProgressAt || item.resolvedAt) && (
                       <div className="mt-2 flex flex-col gap-0.5 text-xs text-slate-500">

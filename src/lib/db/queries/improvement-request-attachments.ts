@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { improvementRequestAttachments, improvementRequests } from "@/lib/db/schema";
@@ -13,10 +13,17 @@ import { improvementRequestAttachments, improvementRequests } from "@/lib/db/sch
  * ⚠️ 이 파일은 **서버에서만** 부른다(queries/improvement-requests.ts 의 같은 주석).
  *
  * ── 🔴 지워진 첨부는 읽지 않는다 ───────────────────────────────────────
- * 이 파일의 **모든** 조회가 `is_deleted = false` 를 조건에 단다. 소프트 삭제라 행은
- * 남아 있지만, 읽는 쪽에는 없는 것과 같아야 한다 — 한 곳이라도 빠뜨리면 지운
- * 스크린샷이 목록에 다시 나타나거나, 더 나쁘게는 **내려받기 통로로 계속 열린다.**
- * 글 자체가 지워진 경우도 같다(아래 두 함수가 글의 is_deleted 까지 본다).
+ * 휴지통(맨 아래 listDeletedScreenshotsByRequestIds) **하나만 빼고** 이 파일의 모든
+ * 조회가 `is_deleted = false` 를 조건에 단다. 소프트 삭제라 행은 남아 있지만, 읽는
+ * 쪽에는 없는 것과 같아야 한다 — 한 곳이라도 빠뜨리면 지운 스크린샷이 목록에 다시
+ * 나타나거나, 더 나쁘게는 **내려받기 통로로 계속 열린다.** 글 자체가 지워진 경우도
+ * 같다(아래 두 함수가 글의 is_deleted 까지 본다).
+ *
+ * 휴지통은 **이름과 크기와 지운 때만** 내놓는다 — 바이트를 여는 통로
+ * (api/…/attachments/[attachmentId])는 지워진 첨부를 그대로 거절하므로, 되살리기
+ * 전까지 그림은 보이지 않는다. 그것이 맞다: 지운 것은 지운 것이고, 휴지통은
+ * 「무엇을 지웠는지」를 알아보고 되살릴 자리일 뿐이다. 어느 조회가 어느 쪽인지는
+ * db/attachment-guard.test.ts 가 글자로 못 박는다.
  *
  * ── 🔴 첨부 하나를 읽을 때는 글 id 와 짝으로 본다 ──────────────────────
  * getImprovementRequestAttachmentFile 은 첨부 id 만으로 찾지 않는다. 주소에 적힌
@@ -73,6 +80,73 @@ export async function listScreenshotsByRequestIds(
       originalFileName: row.originalFileName,
       fileSize: row.fileSize,
       uploadedAt: row.uploadedAt.toISOString(),
+    });
+    grouped.set(row.improvementRequestId, list);
+  }
+  return grouped;
+}
+
+/* ------------------------------------------------------------------ */
+/* 휴지통 — 여기만 지워진 것을 읽는다                                     */
+/* ------------------------------------------------------------------ */
+
+/** 휴지통 한 줄. 살아 있는 장과 같은 값에 「언제 지웠는가」가 붙는다. */
+export type ImprovementRequestDeletedScreenshot = ImprovementRequestScreenshot & {
+  /**
+   * 지운 때(ISO). 소프트 삭제 4칼럼은 **함께** 채워지지만 타입은 그것을 모르므로
+   * null 을 받아 둔다 — 옮겨 온 자료에 is_deleted 만 서 있는 행이 있어도 화면이
+   * 터지지 않는다.
+   */
+  deletedAt: string | null;
+};
+
+/**
+ * 글 여럿의 **지워진** 스크린샷을 한 번에 읽어 글 id 로 묶는다.
+ *
+ * 살아 있는 장을 읽는 listScreenshotsByRequestIds 와 짝이다 — 조건이 `true` 인
+ * 것 하나만 다르고, N+1 을 피하는 방식도 빈 배열을 먼저 돌려보내는 것도 같다.
+ * 🔴 **살아 있는 조회에 인자를 하나 더해 갈래를 타게 만들지 않았다.** 그러면
+ * 「지워진 것을 거르는가」가 부르는 쪽이 넘긴 값에 달리게 되고, 한 곳에서 잘못
+ * 넘긴 참 하나가 지운 스크린샷을 목록에 되돌려 놓는다.
+ *
+ * 차례는 **나중에 지운 것부터**(deleted_at 내림차순, 같으면 id). 방금 잘못 지운
+ * 것이 맨 위에 오는 것이 휴지통에서 가장 잦은 쓰임이다.
+ *
+ * 글이 지워졌는지는 보지 않는다 — 살아 있는 쪽과 같다. 부르는 쪽
+ * (queries/improvement-requests.ts)이 **살아 있는 글의 id 만** 넘긴다.
+ */
+export async function listDeletedScreenshotsByRequestIds(
+  improvementRequestIds: readonly string[],
+): Promise<Map<string, ImprovementRequestDeletedScreenshot[]>> {
+  const grouped = new Map<string, ImprovementRequestDeletedScreenshot[]>();
+  if (improvementRequestIds.length === 0) return grouped;
+
+  const rows = await db
+    .select({
+      id: improvementRequestAttachments.id,
+      improvementRequestId: improvementRequestAttachments.improvementRequestId,
+      originalFileName: improvementRequestAttachments.originalFileName,
+      fileSize: improvementRequestAttachments.fileSize,
+      uploadedAt: improvementRequestAttachments.uploadedAt,
+      deletedAt: improvementRequestAttachments.deletedAt,
+    })
+    .from(improvementRequestAttachments)
+    .where(
+      and(
+        inArray(improvementRequestAttachments.improvementRequestId, [...improvementRequestIds]),
+        eq(improvementRequestAttachments.isDeleted, true),
+      ),
+    )
+    .orderBy(desc(improvementRequestAttachments.deletedAt), desc(improvementRequestAttachments.id));
+
+  for (const row of rows) {
+    const list = grouped.get(row.improvementRequestId) ?? [];
+    list.push({
+      id: row.id,
+      originalFileName: row.originalFileName,
+      fileSize: row.fileSize,
+      uploadedAt: row.uploadedAt.toISOString(),
+      deletedAt: row.deletedAt ? row.deletedAt.toISOString() : null,
     });
     grouped.set(row.improvementRequestId, list);
   }
