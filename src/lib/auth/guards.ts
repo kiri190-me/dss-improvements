@@ -8,23 +8,23 @@
 import { redirect } from "next/navigation";
 
 import type { WebUser } from "@/lib/db/schema";
+import { RETURN_TO_FALLBACK, safeReturnTo } from "./return-to";
 import { getSessionUser } from "./session";
 
 /**
- * 로그인 후 돌아갈 주소를 안전하게 다듬는다.
+ * 로그인 후 돌아갈 주소의 판정은 auth/return-to.ts 한 곳이 갖는다.
  *
- * '/' 로 시작하고 '//' 로 시작하지 않는 경로만 허용한다.
- * '//evil.com' 은 브라우저가 프로토콜 상대 URL 로 해석하므로 반드시 함께 막는다
- * — 막지 않으면 이 사이트의 로그인 링크가 남의 사이트로 보내는 열린 리다이렉트가 된다.
- * 역슬래시가 섞인 값도 거절한다(일부 브라우저가 '/' 로 고쳐 읽는다).
+ * 이 파일이 갖지 않는 이유: 그 판정은 import 가 하나도 없는 순수 함수여야
+ * 시험할 수 있는데, 이 파일은 next/navigation 과 세션(→ DB)을 끌고 온다.
+ * 여기서 다시 내보내는 것은 부르는 쪽(로그인 통로·로그인 화면)이 「로그인
+ * 문지기」 한 곳만 알면 되게 하려는 것이다.
+ *
+ * 🔴 2026-09-21 까지 여기 **네 줄**짜리 판정이 있었다. 제어문자를 막지 않아
+ * "/(탭)/evil.example" 이 그대로 통과했고(브라우저가 탭을 지우면 "//evil.example"
+ * 이 된다), 한글이 든 주소는 응답 머리말에 실리지 못해 로그인이 500 으로 끝났다.
+ * 무엇이 왜 더해졌는지는 return-to.ts 머리말에 적혀 있다.
  */
-export function safeReturnTo(value: string | null | undefined): string {
-  if (!value) return "/";
-  if (!value.startsWith("/")) return "/";
-  if (value.startsWith("//")) return "/";
-  if (value.includes("\\")) return "/";
-  return value;
-}
+export { RETURN_TO_FALLBACK, RETURN_TO_MAX_LENGTH, safeReturnTo } from "./return-to";
 
 /**
  * 로그인 필수. 없으면 포털로 곧장 보낸다.
@@ -41,9 +41,11 @@ export function safeReturnTo(value: string | null | undefined): string {
 export async function requireSession(returnTo?: string): Promise<WebUser> {
   const user = await getSessionUser();
   if (!user) {
+    // 🔴 여기까지 온 값은 무엇이든 safeReturnTo 를 거친다. 부르는 쪽이 주소를
+    // 어디서 얻었든(화면·알림 링크·손으로 친 주소) 믿지 않는다.
     const target = safeReturnTo(returnTo);
     redirect(
-      target === "/"
+      target === RETURN_TO_FALLBACK
         ? "/api/auth/sso/start"
         : `/api/auth/sso/start?returnTo=${encodeURIComponent(target)}`,
     );

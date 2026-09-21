@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-import { safeReturnTo } from "@/lib/auth/guards";
+import { RETURN_TO_FALLBACK, safeReturnTo } from "@/lib/auth/guards";
 import { getSessionUser } from "@/lib/auth/session";
 
 /**
@@ -49,7 +49,7 @@ export default async function LoginPage({
   const error = errorMessage(typeof sp.error === "string" ? sp.error : undefined);
 
   const startUrl =
-    returnTo === "/"
+    returnTo === RETURN_TO_FALLBACK
       ? "/api/auth/sso/start"
       : `/api/auth/sso/start?returnTo=${encodeURIComponent(returnTo)}`;
 
