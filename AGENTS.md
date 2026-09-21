@@ -32,3 +32,13 @@
 - .env 내용을 출력하지 않는다.
 - 실제 고객 정보, 회로도, 펌웨어, 비밀번호, API Key를 외부 서비스로 전송하지 않는다.
 - 통합 로그인 클라이언트 시크릿을 채팅·이메일로 옮기지 않는다. `.env.local`에만 둔다.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->
