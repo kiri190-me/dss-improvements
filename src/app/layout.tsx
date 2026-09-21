@@ -12,6 +12,16 @@ import "./globals.css";
  * 이 줄이 닿아도 바뀌는 것은 없다.
  */
 import "@dss/ui/styles.css";
+/*
+ * 머리말 오른쪽 끝에 앉는 알림 종(@dss/ui)의 생김새. 🔴 메뉴바의 styles.css 와
+ * **다른 파일**이다 — 그 묶음은 조각마다 CSS 한 장이고, 한 장으로 묶으려면 CSS
+ * 안에서 @import 를 해야 하는데 그것은 그쪽 시험이 막는다(README 7절).
+ *
+ * 규칙은 전부 .dss-bell 아래에만 있고, 종은 보여 줄 알림이 **있을 때만**
+ * 그려진다(알림이 없으면 조각이 스스로 null 이다). 로그인 화면에 이 줄이 닿아도
+ * 바뀌는 것은 없다 — 메뉴바 CSS 와 같은 자리·같은 이유다.
+ */
+import "@dss/ui/notification-bell.css";
 
 export const metadata: Metadata = {
   // 포털 타일에 뜨는 이름과 같게 둔다 — 타일을 누르고 들어온 사람이

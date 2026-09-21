@@ -32,4 +32,5 @@ src/components/improvement-requests/improvement-request-screenshot-files.test.ts
 src/components/common/file-drop.test.ts
 src/lib/auth/service-menu-cookie.test.ts
 src/lib/auth/service-menu-wiring.test.ts
+src/lib/auth/notification-bell-wiring.test.ts
 src/lib/auth/return-to.test.ts
