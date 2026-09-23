@@ -235,6 +235,56 @@ export function buildImprovementRequestNotifications(input: {
 }
 
 /* ------------------------------------------------------------------ */
+/* 포털에 내줄 모양으로 옮겨 담기                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 한 시스템이 포털에 보낼 수 있는 줄 수의 상한.
+ *
+ * 🔴 포털이 받은 목록을 **200줄에서 자른다**(dss-auth 의 merge.ts 의
+ * MAX_ITEMS_PER_SOURCE). 그보다 많이 보내는 것은 버려질 바이트를 1.5초짜리
+ * 왕복(그쪽 READ_TIMEOUT_MS)에 싣는 일이다. 그래서 여기서 먼저 자른다.
+ */
+export const PORTAL_MAX_ITEMS_PER_SOURCE = 200;
+
+/**
+ * 내 종에 실을 줄 → **포털에 내줄 줄**.
+ *
+ * ── 🔴 같은 알림인데 두 방향에서 모양이 다르다 ──────────────────────────
+ * 내 화면의 종에 넣을 때는 `sourceId`·`sourceName` 이 **빈 문자열**이다 —
+ * 「우리 줄이니 여기서 확인을 적을 수 있다」는 표시다(shouldAcknowledgeNotification).
+ * 포털에 내줄 때는 그 두 칸에 **우리 이름표**를 적는다 — 받는 쪽에서는 우리가
+ * 「남의 시스템」이고, 보는 사람이 어느 시스템 알림인지 알아야 한다.
+ * `key` 도 `client_id:id` 가 된다(여러 시스템의 줄이 한 목록에 섞이므로 id 만으로는
+ * 부딪힌다).
+ *
+ * ⚠️ 실측(2026-09-23): 포털은 이 세 칸을 **제 등록 정보로 덮어쓴다**
+ * (merge.ts 의 `key: \`${source.clientId}:${id}\``). 그래도 규격대로 채워 보내는
+ * 것은, 포털이 덮어쓰는 것은 그쪽 사정이고 우리 답은 그 자체로 말이 되어야 하기
+ * 때문이다(규격서 「답 (200)」의 아홉 칸).
+ *
+ * 🔴 포털이 **버리는 줄**이 있다 — `id`·`href`·`subject` 중 하나라도 비었거나
+ * `href` 가 절대 주소가 아니면 그 줄만 버린다(merge.ts). 우리 줄은 만드는 자리에서
+ * 이미 셋 다 채워져 있고 href 는 절대 주소다(buildImprovementRequestNotifications).
+ *
+ * 개수는 **보내는 줄 수**다. 포털이 `min(받은 count, 줄 수)` 로 깎으므로
+ * (merge.ts), 자른 뒤의 줄 수보다 큰 수를 적어 보내는 것은 뜻이 없다.
+ */
+export function toPortalNotificationFeed(
+  items: readonly NotificationBellItem[],
+  source: { clientId: string; sourceName: string },
+): ImprovementRequestNotificationFeed {
+  const capped = items.slice(0, PORTAL_MAX_ITEMS_PER_SOURCE).map((item) => ({
+    ...item,
+    key: `${source.clientId}:${item.id}`,
+    sourceId: source.clientId,
+    sourceName: source.sourceName,
+  }));
+
+  return { items: capped, count: capped.length };
+}
+
+/* ------------------------------------------------------------------ */
 /* 확인(눌러서 읽음)을 적을 수 있는 줄인가                               */
 /* ------------------------------------------------------------------ */
 
