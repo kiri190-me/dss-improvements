@@ -53,3 +53,20 @@ export function canWriteImprovementRequests(role: UserRole): boolean {
 export function canManageImprovementRequests(role: UserRole): boolean {
   return role === "ADMIN";
 }
+
+/**
+ * 개선요청 알림(머리말의 종)을 받는 사람 — 관리자만.
+ *
+ * 🔴 **「개발자」 = 지금 ADMIN 인 사람**이다(사용자 결정 2026-09-23). 새 역할을
+ * 만들지 않았다 — 지금 이 회사에서 개선요청을 받아 고치는 사람과 상태를 옮기는
+ * 사람이 같은 사람이라, 역할을 하나 더 만들면 아무도 그 값을 고르지 않는 채
+ * 포털 드롭다운에만 남는다(이 파일 머리말의 같은 판단).
+ *
+ * 🔴 `canManageImprovementRequests` 를 **부른다**(`role === "ADMIN"` 을 다시 적지
+ * 않는다). 둘이 같은 뜻이어서가 아니라 **지금은 같은 답이어야 하기 때문**이고,
+ * 갈라져야 할 날이 오면 이 함수만 고치면 된다. 화면(누구의 종에 싣는가)과 서버
+ * 액션(누구의 확인을 적는가)이 둘 다 이 함수 하나를 부른다.
+ */
+export function canReceiveImprovementRequestNotifications(role: UserRole): boolean {
+  return canManageImprovementRequests(role);
+}

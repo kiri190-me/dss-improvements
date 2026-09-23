@@ -17,9 +17,15 @@ import {
  * DSS 개선요청 — 표
  * ============================================================================
  *
- * 표는 둘이다.
- *   · `web_users`            — 이 사이트의 이용자 (1차, 로그인)
- *   · `improvement_requests` — 개선요청 글 한 줄 (2차, 이 파일 아래쪽)
+ * 표는 넷이다.
+ *   · `web_users`                         — 이 사이트의 이용자 (1차, 로그인)
+ *   · `improvement_requests`              — 개선요청 글 한 줄 (2차)
+ *   · `improvement_request_attachments`   — 그 글에 붙는 스크린샷 (3차)
+ *   · `notification_acknowledgements`     — 알림을 눌러 확인한 기록 (4차, 파일 끝)
+ *
+ * (「표는 둘이다」라고 적혀 있던 자리다. 둘째·셋째 표가 들어온 뒤로 어긋나 있던
+ *  것을 2026-09-23 에 맞췄다 — 머리말이 틀리면 파일을 처음 여는 사람이 가장 먼저
+ *  속는다.)
  *
  * DB 에는 영문 코드를 저장하고, 화면에 보일 한국어 글자는 화면 쪽에서 붙인다.
  *
@@ -526,3 +532,82 @@ export const improvementRequestAttachments = pgTable(
 );
 
 export type ImprovementRequestAttachment = typeof improvementRequestAttachments.$inferSelect;
+
+/* ------------------------------------------------------------------ */
+/* notification_acknowledgements — 「누가 · 어느 알림을 · 언제 확인했나」 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * ────────────────────────────────────────────────────────────────────────
+ * 알림 확인 기록 (2026-09-23)
+ * ────────────────────────────────────────────────────────────────────────
+ * 🔴 **알림을 저장하는 표가 아니다** — 파생된 알림 중 **이미 확인한 것을 걸러
+ * 내는** 표다. 종에 뜨는 줄은 저장하지 않고 개선요청(업무 자료)에서 매번
+ * 파생한다(domain/notifications.ts 머리말). 알림을 따로 저장하면 업무 자료와
+ * 알림이 두 벌의 진실이 되어 언젠가 어긋난다.
+ *
+ * 그런데 이 사이트의 알림은 「처리하면 저절로 사라지는 할 일」이 아니다 —
+ * 사용자가 정한 것은 「**한 번 클릭해서 확인하면** 다시 뜨지 않는 알림」이라
+ * (2026-09-23), 사람이 눌러 확인한 사실을 어딘가 적어 둬야 한다. 적어 두는
+ * 자리가 여기다. A/S 시스템의 같은 이름 표를 그대로 옮겨 온 것이다
+ * (RF_Service_System 의 vendor/dss-core/src/schema/notification-acknowledgements.ts).
+ *
+ * 🔴 **사람마다 따로 적는다**(사용자 결정 2026-09-23). 관리자 A 가 확인해도
+ * 관리자 B 의 종에는 그대로 남는다 — 아래 유니크가 (사람, 알림) 짝인 까닭이다.
+ * 확인 기록이 브라우저가 아니라 DB 에 있으므로, 한 기기에서 누르면 다른
+ * 기기의 종에서도 함께 사라진다.
+ *
+ * ── notification_key 는 알림 id 그대로다 ────────────────────────────────
+ * 지금은 `IMPROVEMENT_REQUEST:<개선요청 uuid>` 하나뿐이다. 파생된 알림과 이
+ * 표의 행을 잇는 것은 이 문자열 하나뿐이라, 같은 일에 대해 매번 **같은 값이
+ * 나오는 것**이 파생 쪽의 약속이다(domain/notifications.ts 의
+ * improvementRequestNotificationId — 시험이 그것을 못 박는다).
+ * 아래 CHECK 는 길이만 지키는 최종 방어선이다. 어느 종류가 확인 대상인지를
+ * DB 는 알지 못한다 — 종류가 늘 때마다 마이그레이션이 필요해지지 않도록
+ * enum 을 쓰지 않았다(improvement_requests 의 service_key 와 같은 판단).
+ *
+ * ── 🔴 user_id 만 ON DELETE CASCADE 인 이유 ─────────────────────────────
+ * 이 저장소의 표들은 사람 참조에 전부 RESTRICT 를 건다 — 「누가 적었나 · 누가
+ * 상태를 옮겼나」가 사람보다 먼저 사라지면 안 되기 때문이다. **이 표에는 그
+ * 이유가 없다.** 확인 기록은 업무 기록이 아니라 한 사람의 화면 상태(종에서
+ * 무엇을 이미 봤나)이고, 그 사람이 없어지면 가리킬 화면도 없다. 여기서
+ * RESTRICT 를 걸면 사람 행을 지우려는 작업이 「알림을 눌러 본 적이 있다」는
+ * 이유만으로 막힌다. 그래서 사람과 함께 사라지게 둔다. (이 사이트는 사람을
+ * 소프트 삭제만 하므로 실제로 CASCADE 가 도는 것은 하드 삭제 때뿐이다.)
+ *
+ * ── 되돌리는 길을 두지 않는다 ───────────────────────────────────────────
+ * updated_at 도 소프트삭제 4칼럼도 없다. 한 번 확인한 것은 고칠 것이 없고,
+ * 되돌리는 길(「다시 안 읽음으로」)도 두지 않는다 — 그 단추를 만들지 않기로
+ * 한 것이 먼저이고, 칸이 없으면 나중에 조용히 생기지도 않는다. 정말로
+ * 필요해지면 그때 마이그레이션을 한 번 하는 편이 낫다.
+ */
+export const notificationAcknowledgements = pgTable(
+  "notification_acknowledgements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+
+    /** 확인한 사람. 🔴 이 표에서만 CASCADE 인 까닭은 머리말. */
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => webUsers.id, { onDelete: "cascade" }),
+
+    /** 확인한 알림의 id. 1~200자(아래 CHECK). 지금 실제 길이는 56자다. */
+    notificationKey: text("notification_key").notNull(),
+
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // 같은 알림을 두 번 눌러도 한 줄이다 — 적는 쪽이 ON CONFLICT DO NOTHING 으로
+    // 이 유니크에 기댄다. 읽는 쪽도 언제나 user_id 로 먼저 좁히므로 이 색인의
+    // 앞 칸이 그 조회를 그대로 받는다(따로 색인을 두지 않는다). CASCADE 삭제가
+    // user_id 로 행을 찾을 때도 같다.
+    uniqueIndex("notification_acknowledgements_user_key_unique").on(t.userId, t.notificationKey),
+
+    check(
+      "notification_acknowledgements_key_length",
+      sql`char_length(${t.notificationKey}) BETWEEN 1 AND 200`
+    ),
+  ],
+);
+
+export type NotificationAcknowledgement = typeof notificationAcknowledgements.$inferSelect;

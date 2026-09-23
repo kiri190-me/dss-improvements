@@ -72,8 +72,15 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         }
         notificationBell={
           /*
-            다른 시스템들의 알림을 모아 그리는 종(@dss/ui). 목록은 포털이
-            합쳐 준다 — 부르는 자리는 PortalNotificationBell 안이다.
+            알림 종(@dss/ui). 이 사이트의 알림(확인하지 않은 개선요청)과 다른
+            시스템들의 알림을 함께 그린다 — 앞의 것은 우리 DB 에서 파생하고
+            뒤의 것은 포털이 합쳐 준다. 둘 다 부르는 자리는
+            PortalNotificationBell 안이다.
+
+            🔴 넘기는 값 셋은 전부 **검증된 세션**에서 온다 — 포털에 물을
+            열쇠(authSub) · 확인 기록을 거를 사람(id) · 자체 알림을 실을지
+            정하는 역할(role). 세 값 모두 requireSession 이 읽은 살아 있는
+            web_users 행의 것이다(쿠키에 박힌 값이 아니다).
 
             🔴 `<Suspense>` 가 이 조각의 전부다. 이 레이아웃은 모든 화면에
             딸려 오므로, 감싸지 않으면 **모든 화면 이동이 포털 왕복만큼
@@ -90,7 +97,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             예전과 똑같이 뜬다.
           */
           <Suspense fallback={null}>
-            <PortalNotificationBell subject={user.authSub} />
+            <PortalNotificationBell
+              subject={user.authSub}
+              userId={user.id}
+              role={user.role}
+            />
           </Suspense>
         }
       />
