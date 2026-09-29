@@ -45,6 +45,42 @@ function flag(name: string): boolean {
   return process.env[name] === "true";
 }
 
+/**
+ * redirect_uri 에서 「밖에서 이 사이트에 닿는 주소」만 떼어 낸다.
+ *
+ * ── 🔴 왜 이 값에서 뽑는가 (2026-09-29 운영에서 실제로 난 일) ────────────
+ * 그 전에는 이 기계의 첫 사설 IPv4(primaryLanAddress)로 만들었다. 개발 PC 에서는
+ * 192.168.x.x 가 잡혀 맞았지만, NAS 의 도커 안에서는 **도커가 컨테이너에 준
+ * 주소**가 잡힌다. 0.2 를 배포한 날 A/S 의 종에 뜬 개선요청 알림의 링크가
+ * `http://172.20.0.7:3500/` 이었고, 눌러도 아무 데도 가지 못했다 — 밖에서 닿을
+ * 수 없는 주소다. 포털은 「절대 주소이고 http 니까」 그대로 통과시키므로
+ * (dss-auth 의 notifications/merge.ts 의 isNavigableHref) **조용히** 틀린 주소가
+ * 나간다. 🔴 `auto` 로 되돌리지 않는다.
+ *
+ * ── 왜 새 환경변수를 두지 않는가 ────────────────────────────────────────
+ * SSO_REDIRECT_URI 가 이미 **그 주소**다. 포털이 로그인 끝에 브라우저를 되돌려
+ * 보내는 곳이라, 정의상 「밖에서 이 사이트에 닿는 주소」와 같아야 한다. 게다가
+ * 포털에 등록된 값과 글자 단위로 같아야 로그인이 된다 — 그러니 따로 관리할 설정이
+ * 하나도 늘지 않고, 틀리면 알림이 아니라 **로그인 단계에서 바로** 드러난다.
+ * 값을 하나 더 두면 둘이 어긋날 수 있고, 어긋난 쪽이 알림 링크라면 증상은 「다른
+ * 사이트의 종에서 누르면 엉뚱한 데로 간다」 하나뿐이라 원인을 찾기 어렵다.
+ * 개발의 `auto` 는 저쪽 getter(ssoRedirectUri)가 이미 풀어 준다.
+ *
+ * 콜백 경로를 떼어 낼 수 없으면 조용히 물러서지 않고 던진다 — 그냥 넘어가면
+ * 알림 링크가 `…/api/auth/sso/callback/` 꼴이 된다.
+ *
+ * (A/S 의 config/sso.ts `getAppBaseUrl` · 휴가의 env.ts `appBaseUrlFrom` 과 같은
+ * 판정이다. 세 시스템이 같은 방식으로 자기 주소를 읽는다.)
+ */
+export function ownBaseUrlFrom(redirectUri: string): string {
+  if (!redirectUri.endsWith(SSO_CALLBACK_PATH)) {
+    throw new Error(
+      `SSO_REDIRECT_URI 는 ${SSO_CALLBACK_PATH} 로 끝나야 합니다 — 이 값에서 이 사이트 자신의 주소도 읽습니다.`,
+    );
+  }
+  return redirectUri.slice(0, -SSO_CALLBACK_PATH.length).replace(/\/+$/, "");
+}
+
 export const env = {
   /** PostgreSQL 접속 주소 */
   get databaseUrl(): string {
@@ -52,29 +88,26 @@ export const env = {
   },
 
   /**
-   * 이 사이트 자신의 주소 앞머리(`http://192.168.1.132:3500` 꼴).
+   * 이 사이트 자신의 주소 앞머리. 뒤에 슬래시를 남기지 않는다.
+   * 운영은 `https://improvements.dss21.co.kr`, 개발은 `http://192.168.x.x:3500` 꼴.
    *
    * 무엇에 쓰나: 이 사이트가 만드는 알림의 `href` 를 **절대 주소**로 만드는 데
-   * 쓴다. 자기 화면에서는 `/` 만으로도 열리지만, 이 목록을 포털에 내주게 되면
-   * (다음 조각) 포털이 상대경로로 온 줄을 버린다. 계산을 두 번 적지 않으려고
-   * 지금부터 절대 주소로 만든다(domain/notifications.ts 의 requireAbsoluteBaseUrl).
+   * 쓴다. 자기 화면에서는 `/` 만으로도 열리지만, 이 목록은 포털을 거쳐 **다른
+   * 시스템의 종**에 실린다 — 포털이 상대경로로 온 줄을 버리기도 하거니와, 남의
+   * 화면에 그려지는 링크라 어차피 절대 주소여야 한다
+   * (domain/notifications.ts 의 requireAbsoluteBaseUrl).
    *
-   * 🔴 `ssoRedirectUri` 에서 콜백 경로를 떼어 쓰지 않는다. 그 값은 **포털에 등록된
-   * 글자**라 우리 사정으로 잘라 쓰면, 등록값을 도메인으로 바꾸는 날 알림 주소가
-   * 말없이 따라 바뀐다(또는 경로가 달라 엉뚱하게 잘린다). 두 값은 서로 다른
-   * 이유로 정해지므로 서로를 재료로 삼지 않는다.
+   * 🔴 **이 기계의 랜 주소로 만들지 않는다.** 그렇게 했다가 2026-09-29 운영에서
+   * 도커 내부 주소(`http://172.20.0.7:3500/`)가 나갔다. 까닭과 고친 방식은
+   * `ownBaseUrlFrom` 머리말에 적었다.
    *
-   * 환경변수를 두지 않고 매번 찾는 이유는 `ssoRedirectUri` 의 auto 와 같다 —
-   * 개발 PC 도 NAS 도 주소를 DHCP 로 받고, 적어 두면 주소가 바뀔 때마다 고칠 곳이
-   * 늘어난다. 🔴 나중에 이 사이트가 도메인 뒤에 서면(HTTPS·리버스 프록시) 이
-   * 기계는 밖에서 보이는 이름을 알 수 없다 — 그때 고칠 곳은 **이 getter 하나**다.
-   *
-   * 랜/Wi-Fi 가 끊겨 주소를 못 찾으면 던진다(primaryLanAddress). 알림을 만드는
-   * 쪽이 그것을 삼켜 빈 목록으로 돌아간다 — 종 하나 때문에 모든 화면이 죽지
+   * 여기서 던질 수 있다 — SSO_REDIRECT_URI 가 없거나, `auto` 인데 랜/Wi-Fi 가
+   * 끊겨 주소를 못 찾거나, 콜백 경로로 끝나지 않을 때다. 알림을 만드는 쪽이
+   * 그것을 삼켜 빈 목록으로 돌아간다 — 종 하나 때문에 모든 화면이 죽지
    * 않게(db/queries/notifications.ts).
    */
   get ownBaseUrl(): string {
-    return resolveAutoUrl("auto", OWN_PORT, primaryLanAddress());
+    return ownBaseUrlFrom(env.ssoRedirectUri);
   },
 
   /**
