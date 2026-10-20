@@ -4,7 +4,10 @@ import { listOwnNotifications } from "@/lib/db/queries/notifications";
 import type { UserRole } from "@/lib/db/schema";
 import { withoutDismissed } from "@/lib/domain/notifications";
 import { acknowledgeNotificationAction } from "@/lib/server/actions/notification-acknowledgements";
-import { dismissNotificationAction } from "@/lib/server/actions/notification-dismissals";
+import {
+  dismissAllNotificationsAction,
+  dismissNotificationAction,
+} from "@/lib/server/actions/notification-dismissals";
 
 /**
  * 머리말의 알림 종 — **이 사이트의 알림과 다른 시스템들의 알림**을 함께 그린다.
@@ -74,6 +77,18 @@ import { dismissNotificationAction } from "@/lib/server/actions/notification-dis
  * 🔴 **열쇠에 접두사가 붙는다.** 제 줄의 `key` 가 `dss-improvements:{id}` 다
  *    (domain 의 bellKeyOf). 🔴 **`id` 는 그대로**이고 확인 기록은 계속 `id` 로
  *    적힌다 — 그 둘이 갈라진 까닭이 그 함수 머리말에 적혀 있다.
+ *
+ * ── 🔴 「보이는 알림 지우기」(일괄)도 **넘긴다** (2026-10-20) ────────────
+ * 줄이 여럿이면 ✕ 를 여러 번 눌러야 했다. 그 단추는 A/S 에만 있었는데, 이제
+ * @dss/ui 가 **단추도 글자도 개수도** 그린다 — 사이트가 하는 일은 함수를 넘기는
+ * 것뿐이다(그쪽 README 「보이는 알림 지우기」 절).
+ *
+ * 🔴 **지울 열쇠를 여기서 묶지 않는다.** 묶음이 내준 자리는 인자를 안 받아서
+ *    누군가는 목록을 함수 안에 넣어 두어야 하는데, 이 사이트는 그 일을 **종의
+ *    클라이언트 껍데기**가 한다(NotificationBellWithAcknowledge). 여기서 미리
+ *    묶으면(`…bind(null, 열쇠들)`) 껍데기가 확인하느라 감춰 둔 줄을 알 길이 없어
+ *    단추에 적힌 수보다 많이 지워진다 — 까닭은 그 조각에 적혀 있다. 여기서는
+ *    **액션 그대로** 넘긴다(확인·✕ 와 같은 모양이다).
  */
 export async function PortalNotificationBell({
   subject,
@@ -106,6 +121,7 @@ export async function PortalNotificationBell({
       count={own.count + feed.count}
       acknowledge={acknowledgeNotificationAction}
       dismiss={dismissNotificationAction}
+      dismissAll={dismissAllNotificationsAction}
     />
   );
 }

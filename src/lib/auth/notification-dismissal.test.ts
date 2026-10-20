@@ -3,9 +3,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 
+import { NotificationBell } from "@dss/ui";
 import type { NotificationBellItem } from "@dss/ui";
 
-import { acknowledgePickedNotification } from "@/components/NotificationBellWithAcknowledge";
+import {
+  acknowledgePickedNotification,
+  dismissVisibleNotifications,
+} from "@/components/NotificationBellWithAcknowledge";
 import {
   buildImprovementRequestNotifications,
   acknowledgeableNotificationKeys,
@@ -13,6 +17,8 @@ import {
   isOwnNotificationKey,
   shouldAcknowledgeNotification,
   withoutDismissed,
+  MAX_DISMISS_KEYS_AT_ONCE,
+  vetDismissKeys,
 } from "@/lib/domain/notifications";
 import { dismissPortalNotifications, normalizePortalNotificationFeed } from "./oidc";
 
@@ -421,10 +427,15 @@ describe("client_secret 이 브라우저로 나가지 않는다", () => {
 
 describe("그리는 자리", () => {
   it("🔴 종에 서버 액션이 닿는다 — 이 함수가 있어야 ✕ 가 그려진다", () => {
-    assert.match(
-      bellComponent,
-      /import \{ dismissNotificationAction \} from "@\/lib\/server\/actions\/notification-dismissals";/,
+    // 🔵 가져오는 줄의 **생김새**를 못 박지 않는다(2026-10-20). 같은 파일에서
+    //    일괄 지우기 액션을 함께 가져오면서 한 줄이 여러 줄로 갈라졌는데, 그때
+    //    깨지는 것은 보장이 아니라 글자 모양뿐이었다. 보는 것은 「그 파일에서
+    //    이 이름을 가져오는가」다.
+    const imported = bellComponent.match(
+      /import \{([\s\S]*?)\} from "@\/lib\/server\/actions\/notification-dismissals";/,
     );
+    assert.ok(imported, "🔴 지움 액션을 가져오는 줄이 없다");
+    assert.match(imported[1], /\bdismissNotificationAction\b/);
     assert.match(bellComponent, /dismiss=\{dismissNotificationAction\}/);
     assert.match(bellShell, /onDismiss=\{dismiss\}/);
   });
@@ -723,5 +734,316 @@ describe("포털이 보낸 dismissed 를 읽는다", () => {
       dismissed: [`${CLIENT_ID}:A`, 3, null, "", `${CLIENT_ID}:B`],
     });
     assert.deepEqual(feed.dismissed, [`${CLIENT_ID}:A`, `${CLIENT_ID}:B`]);
+  });
+});
+
+/* ── 13. 🔴 보이는 알림 지우기(일괄) — 2026-10-20 ─────────────────────── */
+
+/**
+ * ============================================================================
+ * 「**보이는 알림 지우기 n건**」 — 단추 하나로 종을 비운다
+ * ============================================================================
+ * 줄이 여럿이면 ✕ 를 여러 번 눌러야 했다. 그 단추는 A/S 에만 있었고, 이제
+ * @dss/ui 가 **단추도 글자도 개수도** 그린다(묶음 1210d11). 사이트가 하는 일은
+ * 함수를 넘기는 것뿐이다.
+ *
+ * ── 🔴 이 사이트에서만 어려운 것 셋 ─────────────────────────────────────
+ *  ① **제 알림이 있다.** 종은 제 줄과 포털 줄을 합쳐 그린다 — 일괄로 지울 열쇠는
+ *     **합쳐진 뒤의 목록**에서 모아야 한다. 빠뜨리면 「전부 지우기를 눌렀는데
+ *     내 알림만 남는다」가 된다.
+ *  ② 🔴 **확인 기록을 건드리면 안 된다.** 확인은 `item.id`(접두사 없음)를 쓰고
+ *     지움은 `item.key`(접두사 있음)를 쓴다 — **다른 값**이다. 일괄에 `id` 가
+ *     섞이면 포털이 조용히 버린다(아래 첫 시험이 그것을 못 박는다).
+ *  ③ 🔴 **묶음이 그리는 기준과 같게 걸러야 한다.** 묶음은 그릴 수 없는 주소의
+ *     줄을 안 그리고 단추에 적는 수도 그렇게 남은 줄 수다 — 안 맞추면 「3건」을
+ *     눌렀는데 4건이 지워진다.
+ *
+ * 🔵 「확인하는 동안 미리 감추기」(hide/restore)와 **섞지 않는다** — 12절 위의
+ *    8절이 지키는 선이고, 일괄도 그 선 안에 있다(감추지 않는다).
+ * ============================================================================
+ */
+
+const dismissAllShell = withoutComments(
+  read("src/components/NotificationBellWithAcknowledge.tsx"),
+);
+
+/** 포털에서 온 줄 하나 — `sourceId` 에 값이 있고 열쇠에 그쪽 접두사가 붙어 있다. */
+function portalRow(id: string): NotificationBellItem {
+  return {
+    key: `rf-service-system:${id}`,
+    sourceId: "rf-service-system",
+    sourceName: "DSS A/S 관리 시스템",
+    id,
+    kind: "APPROVAL",
+    kindLabel: "결재 대기",
+    subject: "RF-0001",
+    detail: "김아무개가 올렸습니다",
+    href: "http://192.168.1.132:3000/repair-cases/1",
+  };
+}
+
+/** 단추에 적힌 글자를 묶음이 그린 트리에서 꺼낸다. 없으면 null. */
+function dismissAllButtonLabel(rendered: unknown): string | null {
+  let label: string | null = null;
+  const walk = (node: unknown): void => {
+    if (label !== null) return;
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child);
+      return;
+    }
+    if (typeof node !== "object" || node === null || !("props" in node)) return;
+    const element = node as { type: unknown; props: Record<string, unknown> };
+    if (element.type === "button" && element.props.className === "dss-bell__dismissall") {
+      label = String(element.props.children);
+      return;
+    }
+    walk(element.props.children);
+  };
+  walk(rendered);
+  return label;
+}
+
+describe("🔴 일괄에 넘어가는 값은 `key` 다 — `id` 가 아니다", () => {
+  it("🔴 제 줄에서도 접두사가 붙은 `key` 가 나간다 — `id` 는 확인 기록의 값이다", () => {
+    const sent: (readonly string[])[] = [];
+    dismissVisibleNotifications([ownRow()], async (keys) => {
+      sent.push(keys);
+    });
+
+    // 🔴 여기가 이 절에서 가장 위험한 자리다. `item.id` 로 바뀌면 포털이 모양
+    //    틀린 열쇠로 보고 조용히 버려 「눌러도 안 없어지는 알림」이 되고, 더
+    //    나쁘게는 확인 기록(notification_acknowledgements)의 값과 얽힌다.
+    assert.deepEqual(sent, [[OWN_KEY]], "🔴 일괄에 접두사 없는 id 가 넘어갔다");
+    assert.notEqual(OWN_ID, OWN_KEY, "둘이 같으면 이 시험이 아무것도 못 본다");
+
+    // 소스에도 못 박는다 — 다른 경로가 생겼을 때 조용히 지나가지 않게.
+    assert.match(dismissAllShell, /keys\.push\(item\.key\);/);
+    assert.equal(
+      /keys\.push\(item\.id\)/.test(dismissAllShell),
+      false,
+      "🔴 일괄이 모으는 값이 id 로 바뀌었다",
+    );
+  });
+
+  it("🔴 확인 경로는 건드리지 않는다 — 일괄 액션은 확인 기록을 모른다", () => {
+    // 확인은 우리 DB 에 영구 저장되고 유일 제약이 걸려 있다(9절). 일괄 지우기가
+    // 그 표에 닿을 길이 한 군데도 없어야 한다.
+    for (const forbidden of [
+      "isOwnNotificationKey",
+      "markNotification",
+      "notificationAcknowledgements",
+      "acknowledge",
+    ]) {
+      assert.equal(
+        action.includes(forbidden),
+        false,
+        `🔴 지움 액션이 확인 쪽(${forbidden})에 닿는다`,
+      );
+    }
+  });
+});
+
+describe("🔴 제 줄과 포털 줄을 **둘 다** 모은다", () => {
+  it("🔴 합쳐진 목록 전부가 나간다 — 제 줄을 빠뜨리면 「내 알림만 남는다」가 된다", () => {
+    const sent: string[][] = [];
+    dismissVisibleNotifications(
+      [ownRow(), portalRow("APPROVAL:1"), portalRow("APPROVAL:2")],
+      async (keys) => {
+        sent.push([...keys]);
+      },
+    );
+
+    assert.deepEqual(sent, [
+      [OWN_KEY, "rf-service-system:APPROVAL:1", "rf-service-system:APPROVAL:2"],
+    ]);
+  });
+
+  it("🔴 종이 넘기는 목록이 **합쳐진 뒤의 것**이다 — 걸러진 제 줄까지 포함해서", () => {
+    // 서버 조각이 `[...own.items, ...feed.items]` 를 껍데기에 넘기고(11절),
+    // 껍데기는 그 목록에서 감춘 줄을 뺀 `visibleItems` 로 열쇠를 모은다.
+    assert.match(bellComponent, /items=\{\[\.\.\.own\.items, \.\.\.feed\.items\]\}/);
+    assert.match(dismissAllShell, /dismissVisibleNotifications\(visibleItems, dismissAll\)/);
+    // 🔴 `items` 로 모으면 확인하느라 감춰 둔 줄까지 지워진다 — 단추에 적힌 수와
+    //    실제로 지워지는 수가 달라지는 자리다.
+    assert.equal(
+      /dismissVisibleNotifications\(items,/.test(dismissAllShell),
+      false,
+      "🔴 감추기 전의 목록으로 모은다 — 적힌 수보다 많이 지워진다",
+    );
+  });
+});
+
+describe("🔴 묶음이 그리는 기준과 같게 거른다", () => {
+  it("🔴 단추에 적힌 수와 보내는 열쇠 수가 **같다** — 묶음이 센 값으로 맞대어 본다", () => {
+    // 그릴 수 없는 주소의 줄을 묶음은 안 그리고 수에서도 뺀다. 여기서 같은 기준
+    // 으로 거르지 않으면 「3건」을 눌렀는데 4건이 지워진다 — 보이지도 않은 줄이
+    // 말없이 사라지는 것이다.
+    const items = [
+      ownRow(),
+      portalRow("APPROVAL:1"),
+      { ...portalRow("APPROVAL:2"), href: "javascript:alert(1)" },
+      { ...portalRow("APPROVAL:3"), href: "//evil.invalid/x" },
+      portalRow("APPROVAL:4"),
+    ];
+
+    const sent: string[][] = [];
+    dismissVisibleNotifications(items, async (keys) => {
+      sent.push([...keys]);
+    });
+
+    const label = dismissAllButtonLabel(
+      NotificationBell({ items, count: items.length, onDismissAll: () => {} }),
+    );
+    assert.equal(label, "보이는 알림 지우기 3건", "묶음이 센 값이 달라졌다");
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].length, 3, `🔴 ${label} 인데 ${sent[0].length}건을 보낸다`);
+    assert.deepEqual(sent[0], [
+      OWN_KEY,
+      "rf-service-system:APPROVAL:1",
+      "rf-service-system:APPROVAL:4",
+    ]);
+  });
+
+  it("🔴 거르는 함수를 **묶음에서 가져다 쓴다** — 직접 적으면 언젠가 갈라진다", () => {
+    assert.match(dismissAllShell, /isSafeNotificationHref/);
+    assert.match(dismissAllShell, /from "@dss\/ui"/);
+  });
+
+  it("열쇠가 빈 줄은 보내지 않는다 — 그 묶음은 포털이 400 으로 거절한다", () => {
+    const sent: string[][] = [];
+    dismissVisibleNotifications([{ ...portalRow("APPROVAL:1"), key: "" }], async (keys) => {
+      sent.push([...keys]);
+    });
+    assert.deepEqual(sent, [], "빈 열쇠 하나로 포털을 불렀다");
+  });
+});
+
+describe("🔴 단추를 눌러도 밖으로 새지 않는다", () => {
+  it("함수를 안 넘기면 아무 일도 하지 않는다 — 단추 자체가 그려지지 않는다", () => {
+    assert.doesNotThrow(() => dismissVisibleNotifications([ownRow()], undefined));
+    // 묶음은 함수를 받았을 때만 단추를 그린다(@dss/ui). 안 넘긴 모습도 확인한다.
+    assert.equal(
+      dismissAllButtonLabel(NotificationBell({ items: [ownRow()], count: 1 })),
+      null,
+      "🔴 안 넘겼는데 단추가 그려졌다",
+    );
+  });
+
+  it("🔴 보낼 것이 없으면 서버 왕복을 만들지 않는다", () => {
+    let calls = 0;
+    dismissVisibleNotifications([], async () => {
+      calls += 1;
+    });
+    assert.equal(calls, 0);
+  });
+
+  it("🔴 던져도·거절당해도 밖으로 새지 않는다 — 누름의 나머지 처리가 멈추면 안 된다", async () => {
+    assert.doesNotThrow(() =>
+      dismissVisibleNotifications([ownRow()], () => {
+        throw new Error("sync");
+      }),
+    );
+    assert.doesNotThrow(() =>
+      dismissVisibleNotifications([ownRow()], async () => {
+        throw new Error("network");
+      }),
+    );
+    // 처리되지 않은 거절이 남지 않는지 한 박자 기다려 본다(남으면 개발 중
+    // 화면에 오류판이 뜬다 — 확인 경로가 같은 까닭으로 두 갈래를 다 받는다).
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+});
+
+describe("🔴 일괄 액션이 받은 값을 가린다", () => {
+  it("🔴 배열이 아니면 통째로 거절한다 — 종에서 온 값이 아니다", () => {
+    for (const bogus of [undefined, null, "열쇠", 7, { 0: "a" }, new Set(["a"])]) {
+      assert.equal(vetDismissKeys(bogus), null, `${String(bogus)} 가 통과했다`);
+    }
+  });
+
+  it("🔴 울타리를 넘으면 **잘라 보내지 않고** 거절한다 — 적힌 수와 달라지면 거짓말이다", () => {
+    assert.equal(vetDismissKeys(dismissalKeys(MAX_DISMISS_KEYS_AT_ONCE))?.length, MAX_DISMISS_KEYS_AT_ONCE);
+    assert.equal(vetDismissKeys(dismissalKeys(MAX_DISMISS_KEYS_AT_ONCE + 1)), null);
+  });
+
+  it("🔴 울타리가 **정직한 누름 위**에 있다 — 포털이 한 시스템당 200줄에서 자른다", () => {
+    // 사내 시스템이 일곱이고 포털은 부른 사이트 자신에게는 묻지 않으므로 남의
+    // 줄은 많아야 여섯 × 200 = 1200 이다. 그 위에 있어야 정직한 누름이 거절되지
+    // 않는다(근거는 domain/notifications.ts 의 그 상수 머리말).
+    assert.ok(MAX_DISMISS_KEYS_AT_ONCE > 6 * 200, "울타리가 정직한 종보다 낮다");
+  });
+
+  it("모양이 틀린 칸은 **그 칸만** 버린다 — 하나 때문에 단추가 고장 나지 않게", () => {
+    assert.deepEqual(vetDismissKeys(["a", "", 3, null, undefined, "b"]), ["a", "b"]);
+    assert.deepEqual(vetDismissKeys([]), [], "빈 배열은 거절이 아니라 「보낼 것 없음」이다");
+  });
+});
+
+describe("🔴 일괄 액션도 사람을 세션에서 정한다", () => {
+  const start = action.indexOf("export async function dismissAllNotificationsAction");
+  const body = action.slice(start);
+
+  it("🔴 받는 것은 **열쇠 목록뿐**이다 — sub 을 받으면 남의 알림을 지우는 통로가 된다", () => {
+    assert.ok(start >= 0, "일괄 액션을 찾지 못했다");
+    assert.match(
+      body,
+      /^export async function dismissAllNotificationsAction\(keys: readonly string\[\]\): Promise<void> \{/,
+    );
+    assert.match(body, /const actor = await getSessionUser\(\);/);
+    assert.match(body, /dismissPortalNotifications\(actor\.authSub, wanted\)/);
+    assert.equal(
+      /\bsub\b|subject/.test(body.slice(0, body.indexOf("dismissPortalNotifications"))),
+      false,
+      "🔴 사람 번호가 인자로 들어온다",
+    );
+  });
+
+  it("🔴 가린 뒤에만 보낸다 — 세션도 열쇠도 통과해야 포털을 부른다", () => {
+    assert.match(body, /if \(!actor\) return;/);
+    assert.match(body, /const wanted = vetDismissKeys\(keys\);/);
+    assert.match(body, /if \(wanted === null\) return;/);
+    assert.match(body, /if \(wanted\.length === 0\) return;/);
+    assert.ok(
+      body.indexOf("vetDismissKeys") < body.indexOf("dismissPortalNotifications"),
+      "🔴 가리기 전에 보낸다",
+    );
+  });
+
+  it("🔴 「전부 적혔는가」를 **보지 않고** 되살린다 — 줄 하나짜리 ✕ 와 반대다", () => {
+    // 200개를 넘으면 여러 묶음이 나가고, 가운데 하나가 거절돼도 나머지는 적혔다.
+    // 그때 안 되살리면 **이미 지워진 줄이 종에 그대로 남는다.**
+    assert.match(body, /await dismissPortalNotifications\(actor\.authSub, wanted\);/);
+    assert.equal(
+      /const recorded|if \(!recorded\)/.test(body),
+      false,
+      "🔴 일괄이 「전부 적혔는가」를 보고 되살리기를 건너뛴다",
+    );
+    assert.match(body, /revalidatePath\("\/", "layout"\);/);
+  });
+
+  it("🔴 종에 실제로 닿는다 — 액션을 만들어 놓고 안 넘기면 단추가 아예 없다", () => {
+    const imported = bellComponent.match(
+      /import \{([\s\S]*?)\} from "@\/lib\/server\/actions\/notification-dismissals";/,
+    );
+    assert.ok(imported, "지움 액션을 가져오는 줄이 없다");
+    assert.match(imported[1], /\bdismissAllNotificationsAction\b/);
+    assert.match(bellComponent, /dismissAll=\{dismissAllNotificationsAction\}/);
+    assert.match(dismissAllShell, /onDismissAll=\{dismissVisible\}/);
+  });
+
+  it("🔴 묶음 포인터가 일괄 단추가 있는 판이다 — 옛 판에는 자리 자체가 없다", () => {
+    assert.match(vendorBell, /onDismissAll\?: \(\) => void;/);
+    assert.match(vendorBell, /className="dss-bell__dismissall"/);
+    assert.match(vendorBehavior, /const DISMISS_ALL = "button\.dss-bell__dismissall";/);
+    assert.match(vendorCss, /\.dss-bell__dismissall \{/);
+  });
+
+  it("🔴 세 길이 겹치지 않는다 — 일괄 단추는 줄로도 ✕ 로도 읽히지 않는다", () => {
+    // 한 번 누른 것이 둘로 세어지면 읽지도 않은 알림이 확인으로 적히거나
+    // 엉뚱한 화면으로 넘어간다(8절이 ✕ 와 줄에 대해 지키는 것과 같은 선이다).
+    assert.match(vendorBehavior, /const LINK = "a\.dss-bell__link";/);
+    assert.match(vendorBehavior, /const DISMISS = "button\.dss-bell__dismiss";/);
+    // 일괄 단추는 줄(<li>)들과 **다른 <li>** 다 — 줄 안에 있으면 링크에 걸린다.
+    assert.match(vendorBell, /className="dss-bell__dismissrow"/);
   });
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { NotificationBell } from "@dss/ui";
+import { NotificationBell, isSafeNotificationHref } from "@dss/ui";
 import type { NotificationBellItem } from "@dss/ui";
 
 import { shouldAcknowledgeNotification } from "@/lib/domain/notifications";
@@ -63,6 +63,19 @@ export type AcknowledgeNotification = (input: {
  */
 export type DismissNotification = (item: NotificationBellItem) => Promise<void>;
 
+/**
+ * 「**보이는 알림 지우기 n건**」을 포털에 적는 서버 액션의 모양 —
+ * server/actions/notification-dismissals.ts 의 dismissAllNotificationsAction 과 같다.
+ *
+ * 🔴 위 둘과 같은 이유로 **받아서** 쓴다(직접 가져오지 않는다).
+ *
+ * 🔴 **열쇠 목록을 인자로 받는다** — 줄 하나짜리 ✕ 가 줄을 통째로 받는 것과 다른
+ * 모양인데, 묶음이 내준 자리가 `onDismissAll?: () => void` 로 **인자를 안 받기**
+ * 때문이다(@dss/ui README 「보이는 알림 지우기」). 곧 「무엇이 전부인가」를 정하는
+ * 것은 이 껍데기이고, 그 값을 액션에 실어 보내는 것도 여기다.
+ */
+export type DismissAllNotifications = (keys: readonly string[]) => Promise<void>;
+
 /** 화면에서 줄을 감췄다 되살리는 두 손잡이. 시험에서는 가짜를 넣는다. */
 export type AcknowledgeView = {
   hide: (key: string) => void;
@@ -112,11 +125,82 @@ export function acknowledgePickedNotification(
   }, restore);
 }
 
+/**
+ * **지금 종에 그려지는 줄**의 열쇠를 모은다 — 「보이는 알림 지우기」가 지울 것들.
+ *
+ * ── 🔴 왜 `key` 인가 (`id` 가 아니라) ───────────────────────────────────
+ * 지움은 **포털**에 적히고 포털의 열쇠는 `{client_id}:{id}` 다 — 제 줄도 2026-10-20
+ * 부터 그 모양으로 만들어져 온다(domain 의 bellKeyOf). `id` 를 보내면 포털이 모양
+ * 틀린 열쇠로 보고 조용히 버린다. 🔴 `id` 는 **확인 기록**(우리 DB)이 쓰는 값이고
+ * 그 표에는 접두사 없는 옛 열쇠가 영구 저장돼 있다 — 두 값은 **다른 값**이고
+ * 섞으면 안 된다(domain/notifications.ts 의 bellKeyOf 머리말).
+ *
+ * ── 🔴 왜 `isSafeNotificationHref` 로 한 번 거르나 ──────────────────────
+ * 묶음은 **그릴 수 없는 주소의 줄을 안 그리고**, 단추에 적는 수도 그렇게 남은 줄
+ * 수다(@dss/ui 의 drawable). 여기서 같은 기준으로 거르지 않으면 「보이는 알림
+ * 지우기 3건」을 눌렀는데 4건이 지워진다 — 보이지도 않은 줄이 말없이 사라지는
+ * 것이다. 🔴 거르는 함수를 **묶음에서 가져다 쓴다**(직접 적지 않는다). 둘이
+ * 어긋날 수 없게.
+ */
+export function visibleNotificationKeys(items: readonly NotificationBellItem[]): string[] {
+  const keys: string[] = [];
+  for (const item of items) {
+    if (!isSafeNotificationHref(item.href)) continue;
+    if (item.key === "") continue;
+    keys.push(item.key);
+  }
+  return keys;
+}
+
+/**
+ * 「보이는 알림 지우기」를 눌렀을 때 — **지금 그려져 있는 줄 전부**를 지운다.
+ *
+ * 🔴 받는 목록은 **이미 걸러진 뒤의 것**이어야 한다(아래 조각이 `visibleItems` 를
+ * 넘긴다). 서버가 만든 원본 목록을 넘기면 확인하느라 감춰 둔 줄까지 함께
+ * 지워진다 — 사람이 보는 수와 지워지는 수가 어긋난다.
+ *
+ * 🔴 **밖으로 던지지 않는다.** 묶음의 곁들이 조각이 이 함수를 누름 처리
+ * 한가운데서 부른다(BellBehavior 의 notifyDismissedAll). 그쪽도 한 번 더 받아
+ * 주지만 그것은 **동기 예외뿐**이라, 돌려받은 약속이 깨지는 갈래는 여기서 받아야
+ * 한다 — 안 받으면 「처리되지 않은 거절」이 되어 개발 중에는 화면에 오류판이 뜬다
+ * (바로 위 확인 경로가 같은 까닭으로 두 갈래를 다 받는다).
+ *
+ * 🔴 **감추지 않는다.** 줄은 서버가 revalidate 로 목록을 다시 그릴 때 빠진다 —
+ * 줄 하나짜리 ✕ 와 같은 모습이고, 까닭은 위 DismissNotification 머리말에 있다.
+ *
+ * React 를 모르는 순수한 모양이라 시험이 그대로 불러 본다.
+ */
+export function dismissVisibleNotifications(
+  items: readonly NotificationBellItem[],
+  dismissAll: DismissAllNotifications | undefined,
+): void {
+  if (!dismissAll) return;
+
+  const keys = visibleNotificationKeys(items);
+  // 🔴 보낼 것이 없으면 서버 왕복을 만들지 않는다. 묶음도 줄이 없으면 단추를
+  //    아예 안 그리지만(@dss/ui), 이 함수는 그 약속에 기대지 않는다.
+  if (keys.length === 0) return;
+
+  let pending: Promise<void>;
+  try {
+    pending = dismissAll(keys);
+  } catch {
+    // 액션을 부르는 것 자체가 실패했다(망이 끊겼다든가). 줄은 종에 남는다.
+    return;
+  }
+
+  void Promise.resolve(pending).then(
+    () => {},
+    () => {},
+  );
+}
+
 export function NotificationBellWithAcknowledge({
   items,
   count,
   acknowledge,
   dismiss,
+  dismissAll,
 }: {
   /** 🔴 서버가 이미 만들어 넘긴 목록 — 자기 것 앞, 포털에서 온 것 뒤. */
   items: readonly NotificationBellItem[];
@@ -126,6 +210,11 @@ export function NotificationBellWithAcknowledge({
   acknowledge?: AcknowledgeNotification;
   /** 🔴 없으면 ✕ 가 **아예 그려지지 않는다**(@dss/ui 의 onDismiss). */
   dismiss?: DismissNotification;
+  /**
+   * 🔴 없으면 「보이는 알림 지우기 n건」 단추가 **아예 그려지지 않는다**
+   * (@dss/ui 의 onDismissAll). 있어도 그릴 줄이 없으면 서지 않는다.
+   */
+  dismissAll?: DismissAllNotifications;
 }) {
   /**
    * 방금 눌러 확인했고 저장이 도는 중(또는 끝난) 줄. 서버가 준 목록이 다시
@@ -141,6 +230,32 @@ export function NotificationBellWithAcknowledge({
   // 않는다(포털이 센 값이 제 줄 수와 다를 수 있다 — 그쪽 규칙은 우리가 모른다).
   const visibleCount = Math.max(0, count - hiddenKeys.size);
 
+  /**
+   * ── 🔴 일괄 지우기가 **여기서** 열쇠를 모으는 까닭 ──────────────────────
+   * 묶음이 내준 자리는 `() => void` 로 **인자를 안 받는다.** 지울 열쇠를 아는
+   * 것은 사이트이므로 누군가는 그 목록을 함수 안에 넣어 두어야 하는데, 그 자리가
+   * 둘 있다:
+   *  · **서버 조각**(PortalNotificationBell)에서 `액션.bind(null, 열쇠들)` 로
+   *    미리 묶는다. 종이 서버 조각 하나뿐인 사이트(계측기)는 그 길밖에 없다 —
+   *    서버→클라이언트 경계를 건널 수 있는 함수는 서버 액션뿐이라 평범한 화살표
+   *    함수를 넘길 수 없기 때문이다.
+   *  · 🔵 **이 껍데기**에서 모은다. 이 조각은 `"use client"` 라 평범한 함수를
+   *    자유롭게 만들어 묶음에 넘길 수 있다 — 이 사이트에만 있는 길이다.
+   *
+   * 🔴 뒤쪽을 고른 까닭은 **수가 맞아야 하기 때문**이다. 묶음이 단추에 적는
+   *    「n건」은 **이 조각이 넘긴 목록**(visibleItems)을 센 값인데, 그 목록은
+   *    방금 눌러 확인하느라 감춰 둔 줄이 빠진 뒤의 것이다(hiddenKeys). 서버에서
+   *    묶으면 그 감춘 줄을 알 길이 없어 「2건」을 눌렀는데 3건이 지워진다 —
+   *    사람이 방금 확인한 줄까지 포털에 지움으로 적히는 것이다.
+   *
+   * 🔵 그래서 **서버 액션 자체는 그대로 건너온다**(위 dismissAll). 바뀌는 것은
+   *    「인자를 어디서 채우는가」뿐이고, 값이 브라우저를 거쳐 온다는 점은 묶어
+   *    넘기는 길과 똑같다 — 가리는 일은 서버 액션이 한다(vetDismissKeys).
+   */
+  const dismissVisible = dismissAll
+    ? () => dismissVisibleNotifications(visibleItems, dismissAll)
+    : undefined;
+
   return (
     <NotificationBell
       items={visibleItems}
@@ -151,6 +266,8 @@ export function NotificationBellWithAcknowledge({
       // 🔴 `onDismiss` 를 **넘겼을 때만** 줄마다 ✕ 가 그려진다(@dss/ui). 받은
       //    것을 그대로 넘긴다 — 감추지도, 가리지도 않는다(위 DismissNotification).
       onDismiss={dismiss}
+      // 🔴 열쇠를 모으는 자리는 바로 위다 — 그 까닭이 거기 적혀 있다.
+      onDismissAll={dismissVisible}
       // 🔴 `canDismiss` 는 넘기지 않는다 = **모든 줄에 ✕ 가 선다.** 제 줄도 남의
       //    시스템 줄도 지울 수 있다. 한때 A/S 가 「처리해야 사라지는 제 할 일」은
       //    못 지우게 가렸는데 2026-10-20 에 그 규칙을 **풀었다**(A/S 의 551641f) —
