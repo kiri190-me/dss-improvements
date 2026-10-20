@@ -2,7 +2,9 @@ import { NotificationBellWithAcknowledge } from "@/components/NotificationBellWi
 import { fetchPortalNotifications } from "@/lib/auth/oidc";
 import { listOwnNotifications } from "@/lib/db/queries/notifications";
 import type { UserRole } from "@/lib/db/schema";
+import { withoutDismissed } from "@/lib/domain/notifications";
 import { acknowledgeNotificationAction } from "@/lib/server/actions/notification-acknowledgements";
+import { dismissNotificationAction } from "@/lib/server/actions/notification-dismissals";
 
 /**
  * 머리말의 알림 종 — **이 사이트의 알림과 다른 시스템들의 알림**을 함께 그린다.
@@ -54,6 +56,24 @@ import { acknowledgeNotificationAction } from "@/lib/server/actions/notification
  * 포털에서 온 줄은 확인을 적지 않는다 — 「확인했다」를 적을 수 있는 곳은 그
  * 알림을 만든 시스템뿐이다. 그 줄을 누르면 그 시스템의 화면으로 건너가고,
  * 거기서 일을 마치면 다음 왕복에서 목록이 줄어든다.
+ *
+ * ── 🔴 지우기(✕)는 **포털에 적힌다** (2026-10-20) ───────────────────────
+ * 「확인했다」는 그 알림을 만든 시스템에만 적을 수 있지만, 「그만 보겠다」는 포털
+ * 한 곳에 적힌다. 그래서 어느 시스템에서 지우든 사내 시스템 **전부의 종**에서
+ * 사라진다. 적는 자리는 서버 액션이다 — 평범한 함수는 클라이언트 경계를 건너지
+ * 못하고, 중계 통로를 뚫으면 바로 위에서 피한 「시크릿을 다루는 자리」가 하나
+ * 늘어난다(server/actions/notification-dismissals.ts).
+ *
+ * 🔴 **제 줄은 우리가 걸러야 한다.** 남의 줄은 포털이 걸러서 보내지만(items 에서
+ *    빠지고 count 도 줄어 있다), 이 사이트의 알림은 포털이 애초에 보내지 않아
+ *    손댈 수 없다 — 그것을 거르라고 포털이 `dismissed` 를 함께 보낸다. 안 거르면
+ *    **「개선요청에서 지웠는데 개선요청 종에만 그대로 뜬다」**가 된다. 거르는
+ *    함수(withoutDismissed)가 **개수까지 함께 줄인다** — 줄은 빠졌는데 배지
+ *    숫자가 그대로면 「눌러도 안 없어지는 숫자」가 된다.
+ *
+ * 🔴 **열쇠에 접두사가 붙는다.** 제 줄의 `key` 가 `dss-improvements:{id}` 다
+ *    (domain 의 bellKeyOf). 🔴 **`id` 는 그대로**이고 확인 기록은 계속 `id` 로
+ *    적힌다 — 그 둘이 갈라진 까닭이 그 함수 머리말에 적혀 있다.
  */
 export async function PortalNotificationBell({
   subject,
@@ -69,16 +89,23 @@ export async function PortalNotificationBell({
 }) {
   // 🔴 둘 다 던지지 않는다. 포털이 죽었든 우리를 거절했든, DB 가 멎었든 빈
   //    목록이 온다 — 종 하나 때문에 모든 화면이 죽지 않게.
-  const [own, feed] = await Promise.all([
+  const [raw, feed] = await Promise.all([
     listOwnNotifications({ id: userId, role }),
     fetchPortalNotifications(subject),
   ]);
 
+  // 🔴 이 한 줄이 없으면 「여기서 지웠는데 여기서만 그대로 뜬다」가 된다
+  //    (위 머리말). 개수도 함께 줄어든다(domain 의 withoutDismissed).
+  const own = withoutDismissed(raw, feed.dismissed);
+
   return (
     <NotificationBellWithAcknowledge
       items={[...own.items, ...feed.items]}
+      // 🔵 포털이 보낸 `feed.count` 는 **손대지 않는다** — 남의 줄 몫이고 지움이
+      //    이미 반영돼 있다. 줄이는 것은 우리가 더한 제 줄 몫뿐이다.
       count={own.count + feed.count}
       acknowledge={acknowledgeNotificationAction}
+      dismiss={dismissNotificationAction}
     />
   );
 }

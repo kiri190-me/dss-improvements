@@ -44,6 +44,28 @@ import { listAcknowledgedNotificationKeys } from "./notification-acknowledgement
 
 const EMPTY: ImprovementRequestNotificationFeed = { items: [], count: 0 };
 
+/**
+ * 🔴 알림 열쇠의 접두사 — **던지지 않고** 읽는다.
+ *
+ * `env.ssoClientId` 의 getter 는 값이 없으면 던진다(env.ts 의 그 판단). 그 자리를
+ * 그냥 읽으면 설정이 빠진 서버에서 종이, 곧 **모든 화면의 머리말**이 깨진다.
+ *
+ * 🔴 **못 읽으면 빈 문자열로 물러선다** = 접두사 없는 예전 모양이다. 그때 잃는
+ * 것은 「제 줄을 여기서 지운 것이 포털에 적히는 일」 하나뿐이고 — 포털이 모양이
+ * 틀린 열쇠를 조용히 버린다 — 종은 예전과 똑같이 그려진다. 알림 하나 때문에
+ * 화면을 통째로 잃는 것보다 그 편이 낫다는 것이 이 파일 머리말의 판단이다.
+ *
+ * 🔴 아래 try 안에서 읽지 않는 이유: 거기서 던지면 **목록이 통째로 빈다**(catch 가
+ * EMPTY 를 돌려준다). 물러서는 모습이 「접두사 없음」이지 「알림 없음」이 아니다.
+ */
+function ownNotificationClientId(): string {
+  try {
+    return env.ssoClientId;
+  } catch {
+    return "";
+  }
+}
+
 const author = alias(webUsers, "improvement_request_notification_author");
 
 /**
@@ -112,6 +134,8 @@ export async function listOwnNotifications(actor: {
       acknowledgedKeys,
       // 주소를 못 찾으면 여기서 던진다 — 아래 catch 가 받는다(env.ts 의 그 주석).
       baseUrl: env.ownBaseUrl,
+      // 🔴 열쇠의 접두사. 못 읽으면 빈 문자열이다(위 ownNotificationClientId).
+      clientId: ownNotificationClientId(),
     });
   } catch (error) {
     // 🔴 오류의 **종류만** 남긴다. 값(본문·이름·주소)은 싣지 않는다.

@@ -34,6 +34,9 @@ import {
 
 const BASE_URL = "http://192.168.1.132:3500";
 
+/** 포털에 등록된 이 시스템의 식별자. 열쇠의 접두사가 되는 값이다(bellKeyOf). */
+const CLIENT_ID = "dss-improvements";
+
 /** 종이 받는 한 줄의 아홉 칸. 이 목록이 @dss/ui 의 타입과 같아야 한다. */
 const BELL_ITEM_FIELDS = [
   "detail",
@@ -259,13 +262,18 @@ test("🔴 sourceId 가 빈 문자열이다 — 「확인을 적을 수 있는 �
     requests: [request(), request({ id: "bbbbbbbb-2222-4222-8222-222222222222" })],
     acknowledgedKeys: [],
     baseUrl: BASE_URL,
+    // 🔴 접두사를 붙여도 이 표시는 그대로여야 한다 — sourceId 가 채워지는 순간
+    //    확인이 적히지 않는 줄이 된다(shouldAcknowledgeNotification).
+    clientId: CLIENT_ID,
   });
 
   for (const item of feed.items) {
     assert.equal(item.sourceId, "", "🔴 sourceId 에 값이 실렸다 — 확인이 적히지 않는 줄이 된다");
     assert.equal(item.sourceName, "");
-    // 우리 줄은 key 와 id 가 같다. 포털을 거쳐 온 줄만 `client_id:id` 로 갈라진다.
-    assert.equal(item.key, item.id);
+    // 🔴 2026-10-20 부터 우리 줄도 key 와 id 가 **다르다** — 지움이 포털에 적히기
+    //    때문이다(bellKeyOf). 확인 기록은 그대로 id 로 적힌다.
+    assert.equal(item.key, `${CLIENT_ID}:${item.id}`);
+    assert.notEqual(item.key, item.id);
   }
 });
 

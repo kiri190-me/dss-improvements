@@ -44,6 +44,25 @@ export type AcknowledgeNotification = (input: {
   notificationKey: string;
 }) => Promise<{ ok: boolean }>;
 
+/**
+ * 「이 알림은 그만 보겠다」를 **포털에** 적는 서버 액션의 모양 —
+ * server/actions/notification-dismissals.ts 의 dismissNotificationAction 과 같다.
+ *
+ * 🔴 위와 같은 이유로 **받아서** 쓴다(직접 가져오지 않는다). 그 액션 파일은
+ * 세션과 포털 자격증명을 물고 있다.
+ *
+ * ── 🔴 확인과 **다른 것**이다. 섞지 않는다 ──────────────────────────────
+ * 아래 hide/restore 는 **확인을 저장하는 동안** 줄을 미리 감추는 장치다. 지움은
+ * 감추지 않는다 — 두 가지 까닭이다:
+ *  · ✕ 는 줄의 링크 **밖**(형제)이라 누름이 확인 쪽으로 가지 않는다(@dss/ui 의
+ *    BellBehavior 가 `a.dss-bell__link` 를 찾는다). 같은 누름에서 둘이 함께
+ *    도는 일이 **없다** — 섞일 자리가 애초에 없다.
+ *  · 지움은 서버가 revalidate 로 목록을 다시 그려 그때 줄이 빠진다. 여기서도
+ *    감추면 **같은 줄을 두 곳에서 지우는** 꼴이 되어, 포털이 거절했을 때
+ *    (되살릴 길이 없는 채로) 눈에서만 사라진 줄이 남는다.
+ */
+export type DismissNotification = (item: NotificationBellItem) => Promise<void>;
+
 /** 화면에서 줄을 감췄다 되살리는 두 손잡이. 시험에서는 가짜를 넣는다. */
 export type AcknowledgeView = {
   hide: (key: string) => void;
@@ -97,6 +116,7 @@ export function NotificationBellWithAcknowledge({
   items,
   count,
   acknowledge,
+  dismiss,
 }: {
   /** 🔴 서버가 이미 만들어 넘긴 목록 — 자기 것 앞, 포털에서 온 것 뒤. */
   items: readonly NotificationBellItem[];
@@ -104,6 +124,8 @@ export function NotificationBellWithAcknowledge({
   count: number;
   /** 없으면 확인을 적지 않는다 — 줄은 이동만 하고 종에 남는다. */
   acknowledge?: AcknowledgeNotification;
+  /** 🔴 없으면 ✕ 가 **아예 그려지지 않는다**(@dss/ui 의 onDismiss). */
+  dismiss?: DismissNotification;
 }) {
   /**
    * 방금 눌러 확인했고 저장이 도는 중(또는 끝난) 줄. 서버가 준 목록이 다시
@@ -125,6 +147,15 @@ export function NotificationBellWithAcknowledge({
       count={visibleCount}
       // 🔴 colorScheme 을 넘기지 않는다 — 이 사이트는 라이트 고정이고 기본값
       //    "host" 가 그것을 그대로 따른다(@dss/ui README 4절).
+      //
+      // 🔴 `onDismiss` 를 **넘겼을 때만** 줄마다 ✕ 가 그려진다(@dss/ui). 받은
+      //    것을 그대로 넘긴다 — 감추지도, 가리지도 않는다(위 DismissNotification).
+      onDismiss={dismiss}
+      // 🔴 `canDismiss` 는 넘기지 않는다 = **모든 줄에 ✕ 가 선다.** 제 줄도 남의
+      //    시스템 줄도 지울 수 있다. 한때 A/S 가 「처리해야 사라지는 제 할 일」은
+      //    못 지우게 가렸는데 2026-10-20 에 그 규칙을 **풀었다**(A/S 의 551641f) —
+      //    다른 시스템의 종에서는 어차피 지워지므로, 막는 것이 아니라 헷갈리게
+      //    만들고 있었기 때문이다. 같은 까닭이 여기에도 그대로 적용된다.
       onAcknowledge={(picked) =>
         acknowledgePickedNotification(picked, acknowledge, {
           hide: (key) => setHiddenKeys((prev) => new Set(prev).add(key)),

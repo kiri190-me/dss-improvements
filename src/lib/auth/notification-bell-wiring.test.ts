@@ -135,7 +135,7 @@ test("🔴 포털에 닿지 못해도 던지지 않는다 — 빈 목록과 degr
 
   try {
     const feed = await fetchPortalNotifications("00000000-0000-0000-0000-000000000000");
-    assert.deepEqual(feed, { items: [], count: 0, degraded: true });
+    assert.deepEqual(feed, { items: [], count: 0, degraded: true, dismissed: [] });
   } finally {
     process.env = before;
   }
@@ -151,7 +151,7 @@ test("🔴 설정이 빠져도 던지지 않는다 — env 의 getter 가 던지
 
   try {
     const feed = await fetchPortalNotifications("00000000-0000-0000-0000-000000000000");
-    assert.deepEqual(feed, { items: [], count: 0, degraded: true });
+    assert.deepEqual(feed, { items: [], count: 0, degraded: true, dismissed: [] });
   } finally {
     process.env = before;
   }
@@ -159,7 +159,7 @@ test("🔴 설정이 빠져도 던지지 않는다 — env 의 getter 가 던지
 
 test("포털 계정과 이어지지 않은 사람은 아예 묻지 않는다 — 빈 sub 로는 나가지 않는다", async () => {
   const feed = await fetchPortalNotifications("");
-  assert.deepEqual(feed, { items: [], count: 0, degraded: true });
+  assert.deepEqual(feed, { items: [], count: 0, degraded: true, dismissed: [] });
 });
 
 test("🔴 거절(401·403·429·503)도 같은 자리에서 삼킨다 — 화면에는 「알림 없음」으로 보인다", () => {

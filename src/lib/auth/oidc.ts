@@ -419,13 +419,35 @@ export type PortalNotificationFeed = {
    * 않는다 — 나중에 「일부를 못 불러왔습니다」를 보여 주기로 하면 여기 있다.
    */
   degraded: boolean;
+  /**
+   * 🔴 그 사람이 지운 알림의 열쇠 — **이 사이트 몫만** 온다(2026-10-20).
+   *
+   * 포털은 **남의 시스템 줄을 제 손으로 걸러서** 보낸다. `items` 에 없고 `count`
+   * 도 그만큼 줄어 있으므로 거기에는 할 일이 없다. 할 일이 남는 것은 **제 줄**
+   * 뿐이다 — 포털은 부른 사이트 자신에게는 묻지 않아(위 머리말) 이 사이트의
+   * 알림을 애초에 모르고, 그 목록은 db/queries/notifications.ts 가 우리 DB 에서
+   * 직접 만들어 이어 붙인다. 포털이 손댈 수 없는 그 목록을 거르라고 있는 칸이다.
+   *
+   * 🔴 **안 거르면 「개선요청에서 지웠는데 개선요청 종에만 그대로 뜬다」가 된다.**
+   * 거르는 자리는 domain/notifications.ts 의 `withoutDismissed` 하나다.
+   *
+   * 🔵 지운 것이 없으면 **빈 배열**이다. 포털이 지움 기록을 못 읽어도 빈 배열이고
+   * 그때는 `degraded` 가 선다 — 지웠던 줄이 다시 뜰 뿐이다. 지움은 보기를 미루는
+   * 것이지 지워지는 자료가 아니라, 종을 통째로 끄는 것보다 그 편이 낫다.
+   */
+  dismissed: string[];
 };
 
 /**
  * 못 물어봤을 때의 답. 🔴 **던지지 않는다** — 알림 하나 때문에 머리말이,
  * 곧 사이트 전체가 깨지는 일은 없어야 한다(그쪽 문서: 사이트는 거절을 삼킨다).
  */
-const UNREACHABLE: PortalNotificationFeed = { items: [], count: 0, degraded: true };
+const UNREACHABLE: PortalNotificationFeed = {
+  items: [],
+  count: 0,
+  degraded: true,
+  dismissed: [],
+};
 
 /** 한 줄의 아홉 칸. 하나라도 글자가 아니면 그 줄만 버린다. */
 function toBellItem(row: unknown): NotificationBellItem | null {
@@ -476,7 +498,13 @@ export function normalizePortalNotificationFeed(body: unknown): PortalNotificati
       ? answer.count
       : 0;
 
-  return { items, count, degraded: answer.degraded === true };
+  // 🔴 칸이 없는 **옛 포털에 대고도** 돌아야 한다 — 그때는 빈 배열이고, 제 줄이
+  //    걸러지지 않을 뿐 종은 예전 그대로 그려진다. 글자가 아닌 조각은 버린다.
+  const dismissed = Array.isArray(answer.dismissed)
+    ? answer.dismissed.filter((key): key is string => typeof key === "string" && key !== "")
+    : [];
+
+  return { items, count, degraded: answer.degraded === true, dismissed };
 }
 
 /**
@@ -537,4 +565,122 @@ export async function fetchPortalNotifications(
     console.error("[sso] 알림 응답을 읽지 못했습니다.");
     return UNREACHABLE;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* 「이 알림은 그만 보겠다」를 포털에 적는다 (쓰는 쪽)                    */
+/*                                                                     */
+/* 2026-10-19 까지 지움은 **각 사이트의 브라우저**에 적혔다. 브라우저     */
+/* 저장소는 주소(포트)별로 갈려서 같은 사람이 시스템마다 다른 목록을      */
+/* 봤다 — A/S(3000)에서 지운 줄이 개선요청(3500)의 종에는 그대로 떴다.    */
+/* 그래서 지움을 포털 한 곳에 모았고, 여기는 그 **쓰는 쪽**이다.          */
+/*                                                                     */
+/* 읽는 쪽(fetchPortalNotifications)과 같은 자격증명·같은 상한·같은      */
+/* 거절이다. 둘이 어긋나면 「알림은 오는데 지움은 안 먹히는」 상태가 되고,*/
+/* 그 어긋남은 신고로만 드러난다. 그래서 같은 파일에 나란히 둔다.         */
+/*                                                                     */
+/* 🔴 이 사이트에서 지우는 줄에는 **제 알림도 섞여 있다.** 제 줄의 열쇠도 */
+/*    모양이 같아(`dss-improvements:…` — domain 의 bellKeyOf) 포털이      */
+/*    그대로 받아 적고, 다음 왕복에서 `dismissed` 로 돌려준다. 거르는 일은*/
+/*    domain 의 `withoutDismissed` 가 한다.                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 한 번에 보낼 수 있는 열쇠 수.
+ *
+ * 🔴 **넘으면 포털이 400 으로 통째로 거절한다 — 앞의 200개만 받아 주지 않는다.**
+ * 그래서 자르는 일을 보내는 쪽이 한다. 값의 근거는 포털 쪽에 있다
+ * (dss-auth/docs/사이트-알림-통로.md, 2026-10-20). 🔴 여기 값을 올려도 포털이 안
+ * 올라가면 소용이 없다 — **저쪽을 따라가는 값**이지 우리가 정하는 값이 아니다.
+ */
+const DISMISSALS_PER_REQUEST = 200;
+
+/**
+ * 열쇠 한 묶음을 포털에 적는다. 🔴 **던지지 않는다** — 돌려주는 것은 「적혔는가」
+ * 하나뿐이고, 까닭은 서버 로그에만 남는다.
+ */
+async function recordDismissalChunk(
+  subject: string,
+  dismissalKeys: readonly string[],
+): Promise<boolean> {
+  let response: Response;
+  try {
+    // env 의 getter 는 값이 없으면 던진다 — 그래서 try 안에서 읽는다. 설정이 빠진
+    // 것 때문에 ✕ 한 번이 화면을 깨면 안 된다(읽는 쪽과 같은 판단).
+    const credentials = `${encodeURIComponent(env.ssoClientId)}:${encodeURIComponent(
+      env.ssoClientSecret,
+    )}`;
+
+    response = await fetch(`${env.ssoIssuer}/api/integration/notification-dismissals`, {
+      method: "POST",
+      headers: {
+        authorization: `Basic ${Buffer.from(credentials, "utf8").toString("base64")}`,
+        "content-type": "application/x-www-form-urlencoded",
+        accept: "application/json",
+      },
+      body: new URLSearchParams({ sub: subject, keys: dismissalKeys.join(",") }).toString(),
+      cache: "no-store",
+      signal: AbortSignal.timeout(NOTIFICATIONS_TIMEOUT_MS),
+    });
+  } catch (error) {
+    // 🔴 남기는 것은 오류의 **종류**뿐이다. 열쇠에는 개선요청 id 가 들어 있고,
+    //    본문 미리보기가 섞인 적은 없지만 식별자 자체를 로그에 쌓을 까닭이 없다.
+    console.error(
+      "[sso] 알림 지움을 적지 못했습니다:",
+      error instanceof Error ? error.name : "unknown",
+    );
+    return false;
+  }
+
+  if (!response.ok) {
+    // 거절 본문은 포털의 내부 설정을 설명할 수 있다. 상태만 남긴다.
+    console.error("[sso] 알림 지움 통로 거절:", response.status);
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * 「이 알림들은 그만 보겠다」를 포털에 적는다. 🔴 **어떤 일이 있어도 던지지
+ * 않는다** — 읽는 쪽과 같은 약속이다. 못 적으면 그 줄이 종에 남을 뿐이고, 그것이
+ * 화면이 깨지는 것보다 훨씬 낫다.
+ *
+ * @param subject 포털의 users.id (= ID 토큰의 sub). 이 사이트는 `web_users.authSub`
+ *                로 들고 있다. 🔴 **서버가 제 세션에서 읽은 값**이어야 한다 —
+ *                브라우저가 보낸 값을 그대로 넘기면 남의 알림을 지우는 통로가 된다.
+ * @param dismissalKeys `{client_id}:{id}` 모양. 모양이 틀리거나 모르는 시스템의
+ *                것은 포털이 **조용히 버린다** — 한 줄 때문에 묶음이 통째로
+ *                실패하지 않는다.
+ * @returns 보낸 묶음이 **전부** 적혔는가. 하나라도 거절되면 false 다.
+ *
+ * 🔵 몇 번을 다시 보내도 안전하다 — 같은 열쇠를 두 번 지우는 것은 한 번 지우는
+ *    것과 같다(포털이 이미 있는 열쇠를 조용히 넘긴다).
+ */
+export async function dismissPortalNotifications(
+  subject: string,
+  dismissalKeys: readonly string[],
+): Promise<boolean> {
+  if (!subject) return false;
+
+  // 같은 열쇠가 두 번 실려 와도 한 번만 보낸다. 포털은 어느 쪽이든 같은 답을 주지만,
+  // 겹친 값이 200 칸을 차지해 묶음이 괜히 늘어나지 않게 한다.
+  const wanted = Array.from(
+    new Set(dismissalKeys.filter((key): key is string => typeof key === "string" && key !== "")),
+  );
+
+  // 🔴 보낼 것이 없으면 **아예 부르지 않는다.** 빈 목록은 포털이 400(no_keys)으로
+  //    거절하므로, 부르는 것은 거절 한 줄을 로그에 쌓는 일뿐이다.
+  if (wanted.length === 0) return false;
+
+  // 🔴 묶음을 **차례로** 보낸다(한꺼번에 던지지 않는다). ✕ 한 번에 포털로 여러
+  //    연결이 동시에 열리면 인증 실패를 세는 통과 포털의 DB 에 쓸데없는 봉우리를
+  //    만든다. 이 사이트의 알림은 두 자릿수라 묶음은 사실상 늘 하나다.
+  let recorded = true;
+  for (let at = 0; at < wanted.length; at += DISMISSALS_PER_REQUEST) {
+    const chunk = wanted.slice(at, at + DISMISSALS_PER_REQUEST);
+    if (!(await recordDismissalChunk(subject, chunk))) recorded = false;
+  }
+
+  return recorded;
 }

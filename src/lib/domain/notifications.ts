@@ -118,6 +118,34 @@ export function improvementRequestNotificationId(requestId: string): string {
 }
 
 /**
+ * 알림 id → 종 한 줄의 **열쇠**(`key`).
+ *
+ * ── 🔴 왜 `id` 와 다른 값이 되었나 (2026-10-20) ─────────────────────────
+ * 2026-10-19 까지 「이 알림 그만 보겠다」는 각 사이트의 **브라우저**에 적혔고,
+ * 그래서 우리 줄은 `key` 와 `id` 가 같아도 아무 탈이 없었다. 지금은 그 기록이
+ * **포털 한 곳**에 쌓인다 — 어느 시스템에서 지우든 사내 시스템 전부의 종에서
+ * 사라지게 하려고 그렇게 바꿨다(dss-auth/docs/사이트-알림-통로.md).
+ *
+ * 포털에 적히는 열쇠는 **`{client_id}:{id}`** 다. 접두사가 없으면 같은 알림이
+ * 개선요청 종에서는 `{id}`, 계측기 종에서는 `dss-improvements:{id}` 로 보여서
+ * **계측기에서 지워도 개선요청 종에는 그대로 남는다** — 다른 곳에서는 사라지는데
+ * 여기서만 남는, 제일 헷갈리는 모양이다.
+ *
+ * 🔴 **`id` 는 건드리지 않는다.** 확인 기록(notification_acknowledgements)과
+ * 알림을 잇는 것은 `id` 하나뿐이고, 그 표에는 `(user_id, notification_key)` 에
+ * 유일 제약이 걸려 **영구 저장**된다(db/schema.ts). 확인을 적는 쪽이 `item.key`
+ * 를 쓰도록 바뀌면 옛 기록과 모양이 달라져 **이미 확인한 알림이 전부 다시 뜨고**,
+ * 되돌릴 수도 없다(사람들이 다시 확인해야 한다). 확인 경로는 지금도
+ * `item.id` 를 쓴다(components/NotificationBellWithAcknowledge.tsx).
+ *
+ * 🔴 접두사가 **빈 문자열이면 붙이지 않는다** — 설정을 못 읽었을 때 물러서는
+ * 자리다. 그때 잃는 것은 제 줄 지움이 포털에 안 통하는 것 하나뿐이다.
+ */
+function bellKeyOf(id: string, clientId: string): string {
+  return clientId === "" ? id : `${clientId}:${id}`;
+}
+
+/**
  * 절대 주소인지 보고 끝의 슬래시를 떼어 낸다.
  *
  * 🔴 **상대경로를 받지 않는다.** 자기 화면에서는 `/` 로도 잘 열리지만, 조각 2에서
@@ -197,6 +225,17 @@ export function buildImprovementRequestNotifications(input: {
   acknowledgedKeys: Iterable<string>;
   /** 이 사이트의 주소 앞머리. 🔴 절대 주소여야 한다(requireAbsoluteBaseUrl). */
   baseUrl: string;
+  /**
+   * 포털에 등록된 이 시스템의 식별자(`SSO_CLIENT_ID`). 🔴 **`key` 의 접두사**다 —
+   * 위 bellKeyOf 머리말이 왜 필요한지 적고 있다.
+   *
+   * 🔴 **빈 문자열이면 접두사 없이 만든다**(2026-10-20 이전 모양). 안 넘기는 것과
+   * 같은 뜻이고, 부르는 쪽이 설정을 못 읽었을 때 **물러서는 자리**다 — 설정 하나
+   * 때문에 종이, 곧 모든 화면이 깨지면 안 된다(db/queries/notifications.ts 의
+   * ownNotificationClientId). 그 경우 잃는 것은 **제 줄 지움이 포털에 안 통하는
+   * 것** 하나뿐이고, 종은 예전 그대로 그려진다.
+   */
+  clientId?: string;
 }): ImprovementRequestNotificationFeed {
   const href = `${requireAbsoluteBaseUrl(input.baseUrl)}${IMPROVEMENT_REQUEST_NOTIFICATION_PATH}`;
   const acknowledged = new Set(input.acknowledgedKeys);
@@ -217,9 +256,9 @@ export function buildImprovementRequestNotifications(input: {
     seen.add(id);
 
     items.push({
-      // 우리 것은 key 와 id 가 같은 값이다. 포털을 거쳐 온 줄만 `client_id:id`
-      // 라 둘이 갈라진다(A/S 의 domain/notification-bell-items.ts 와 같다).
-      key: id,
+      // 🔴 `{client_id}:{id}` — 포털에 지움이 적히는 그 열쇠다(bellKeyOf).
+      //    🔴 **`id` 와 다른 값이다.** 확인 기록은 그대로 `id` 로 적힌다.
+      key: bellKeyOf(id, input.clientId ?? ""),
       sourceId: "",
       sourceName: "",
       id,
@@ -232,6 +271,48 @@ export function buildImprovementRequestNotifications(input: {
   }
 
   return { items, count: items.length };
+}
+
+/* ------------------------------------------------------------------ */
+/* 🔴 포털이 돌려준 지움으로 **제 줄**을 거른다                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 「그만 보겠다」로 지워진 제 줄을 목록에서 뺀다.
+ *
+ * ── 🔴 왜 이 일이 우리 몫인가 ──────────────────────────────────────────
+ * **남의 시스템 줄**은 포털이 제 손으로 걸러서 보낸다 — `items` 에서 빠져 있고
+ * `count` 도 그만큼 줄어 있어 우리가 할 일이 없다(그래서 `feed.count` 는 **손대지
+ * 않는다**). 할 일이 남는 것은 **제 줄**뿐이다: 포털은 부른 사이트 자신에게는
+ * 묻지 않아(규격서 「빠져 있는 것」) 이 목록을 애초에 모르고, 그것을 거르라고
+ * `dismissed` 를 함께 보낸다.
+ *
+ * 🔴 **안 거르면 「여기서 지웠는데 여기서만 그대로 뜬다」가 된다.**
+ *
+ * 🔴 **개수도 함께 줄인다.** 줄은 빠졌는데 배지 숫자가 그대로면 사람은 「알림이
+ * 있다는데 열면 없다」로 읽는다. 지금 이 시스템의 `count` 는 줄 수와 같지만
+ * (한 요청이 한 줄이다) **0 아래로 내려가지 않게** 바닥을 둔다 — 세는 규칙이
+ * 바뀌거나(묶음 줄·상한에 잘린 목록) 이미 사라진 줄의 지움 기록이 섞여 와도
+ * 배지가 음수가 되지 않게.
+ *
+ * 🔵 **열쇠를 다시 조립하지 않는다.** 만들어진 `item.key` 를 그대로 맞춰 본다 —
+ * 여기서 접두사를 다시 지으면 만드는 자리(bellKeyOf)와 갈라질 수 있고, 갈라지면
+ * 아무 오류 없이 「지워지지 않는 알림」만 남는다.
+ *
+ * 망도 DB 도 타지 않는 **순수 함수**라 그대로 불러 시험한다.
+ */
+export function withoutDismissed(
+  mine: { items: readonly NotificationBellItem[]; count: number },
+  dismissed: readonly string[],
+): ImprovementRequestNotificationFeed {
+  if (dismissed.length === 0) return { items: [...mine.items], count: mine.count };
+
+  const hidden = new Set(dismissed);
+  const items = mine.items.filter((item) => !hidden.has(item.key));
+  const removed = mine.items.length - items.length;
+  if (removed === 0) return { items, count: mine.count };
+
+  return { items, count: Math.max(0, mine.count - removed) };
 }
 
 /* ------------------------------------------------------------------ */
@@ -257,6 +338,11 @@ export const PORTAL_MAX_ITEMS_PER_SOURCE = 200;
  * 「남의 시스템」이고, 보는 사람이 어느 시스템 알림인지 알아야 한다.
  * `key` 도 `client_id:id` 가 된다(여러 시스템의 줄이 한 목록에 섞이므로 id 만으로는
  * 부딪힌다).
+ *
+ * 🔵 2026-10-20 부터 **내 종에 넣는 줄도 같은 모양의 `key`** 를 들고 온다
+ * (bellKeyOf — 지움이 포털에 적히기 때문이다). 그래서 아래 덮어쓰기는 대개 같은
+ * 값을 다시 적는 일이 되었다. 그래도 **`item.id` 에서 다시 만든다** — 설정을 못
+ * 읽어 접두사 없이 만들어진 줄이 섞여 와도 포털에는 규격대로 나가야 한다.
  *
  * ⚠️ 실측(2026-09-23): 포털은 이 세 칸을 **제 등록 정보로 덮어쓴다**
  * (merge.ts 의 `key: \`${source.clientId}:${id}\``). 그래도 규격대로 채워 보내는
