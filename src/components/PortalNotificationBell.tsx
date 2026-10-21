@@ -3,7 +3,10 @@ import { fetchPortalNotifications } from "@/lib/auth/oidc";
 import { listOwnNotifications } from "@/lib/db/queries/notifications";
 import type { UserRole } from "@/lib/db/schema";
 import { withoutDismissed } from "@/lib/domain/notifications";
-import { acknowledgeNotificationAction } from "@/lib/server/actions/notification-acknowledgements";
+import {
+  acknowledgeNotificationAction,
+  acknowledgePortalNotificationAction,
+} from "@/lib/server/actions/notification-acknowledgements";
 import {
   dismissAllNotificationsAction,
   dismissNotificationAction,
@@ -56,9 +59,17 @@ import {
  * (NotificationBellWithAcknowledge — 그 파일 머리말). 🔴 목록은 여기서 다
  * 만들어 **값으로** 넘긴다.
  *
- * 포털에서 온 줄은 확인을 적지 않는다 — 「확인했다」를 적을 수 있는 곳은 그
- * 알림을 만든 시스템뿐이다. 그 줄을 누르면 그 시스템의 화면으로 건너가고,
- * 거기서 일을 마치면 다음 왕복에서 목록이 줄어든다.
+ * 🔴 포털에서 온 줄도 **이제 확인을 적는다** (2026-10-22). 그 전까지는 「확인했다」를
+ * 적을 수 있는 곳이 그 알림을 만든 시스템뿐이라고 보아 여기서 끝냈다. 이제
+ * 포털에 확인을 적는 통로가 생겨(dss-auth 의
+ * /api/integration/notification-acknowledgements) **남의 시스템 줄이어도
+ * 여기서 적을 수 있다.** 적는 곳만 갈린다 — 우리 줄은 우리 표
+ * (notification_acknowledgements), 포털 줄은 포털 한 곳(acknowledgePortalNotificationAction).
+ * 가르는 판정은 여전히 domain/notifications.ts 의 shouldAcknowledgeNotification
+ * 한 곳이고(components/NotificationBellWithAcknowledge.tsx 의
+ * acknowledgePickedNotification), 그 알림은 눌러도 바로 사라지지 않을 수
+ * 있다 — 결재 승인·부품 요청처럼 **동작이 필요한 줄**인지는 포털이 판단해
+ * 해소될 때까지 종에 남긴다.
  *
  * ── 🔴 지우기(✕)는 **포털에 적힌다** (2026-10-20) ───────────────────────
  * 「확인했다」는 그 알림을 만든 시스템에만 적을 수 있지만, 「그만 보겠다」는 포털
@@ -120,6 +131,7 @@ export async function PortalNotificationBell({
       //    이미 반영돼 있다. 줄이는 것은 우리가 더한 제 줄 몫뿐이다.
       count={own.count + feed.count}
       acknowledge={acknowledgeNotificationAction}
+      acknowledgePortal={acknowledgePortalNotificationAction}
       dismiss={dismissNotificationAction}
       dismissAll={dismissAllNotificationsAction}
     />

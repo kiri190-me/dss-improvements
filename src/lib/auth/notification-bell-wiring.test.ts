@@ -27,8 +27,10 @@ import { fetchPortalNotifications, normalizePortalNotificationFeed } from "./oid
  *   ①+② → PortalNotificationBell 이 **자기 것 앞 · 받은 것 뒤**로 이어 붙이고
  *     → (app)/layout.tsx 가 <Suspense> 로 감싸 머리말에 내려보내고
  *     → AppHeader 가 줄의 **맨 오른쪽 끝**에 그린다(@dss/ui 의 NotificationBell)
- *     → 줄을 누르면 클라이언트 껍데기가 **우리 줄일 때만** 확인을 적는다
- *       (server/actions/notification-acknowledgements.ts)
+ *     → 줄을 누르면 클라이언트 껍데기가 **어느 줄이든** 확인을 적는다 —
+ *       우리 줄은 우리 표(server/actions/notification-acknowledgements.ts 의
+ *       acknowledgeNotificationAction), 포털 줄은 포털 한 곳
+ *       (같은 파일의 acknowledgePortalNotificationAction, 2026-10-22)
  *
  * ── 여기서 지키는 것 다섯 ───────────────────────────────────────────────
  *  1. 🔴 **어떤 답이 와도 던지지 않는다.** 포털이 죽어도·거절해도·설정이
@@ -519,6 +521,18 @@ test('🔴 클라이언트로 넘어가는 것은 껍데기 하나뿐이다 — 
     );
   }
   assert.match(bellShell, /acknowledge\?: AcknowledgeNotification;/);
+  // 🔴 포털 확인(2026-10-22)도 같은 자리를 지킨다 — 받아서 쓰고, 직접 가져오지 않는다.
+  assert.match(bellShell, /acknowledgePortal\?: AcknowledgeNotification;/);
+});
+
+test("🔴 포털 확인 액션이 종까지 실제로 이어진다 — 껍데기가 받는 자리가 비지 않는다 (2026-10-22)", () => {
+  assert.match(
+    bellComponent,
+    /import \{\s*acknowledgeNotificationAction,\s*acknowledgePortalNotificationAction,\s*\} from "@\/lib\/server\/actions\/notification-acknowledgements";/,
+  );
+  assert.match(bellComponent, /acknowledgePortal=\{acknowledgePortalNotificationAction\}/);
+  assert.match(bellShell, /acknowledgePickedNotification\(picked, acknowledge, \{/);
+  assert.match(bellShell, /\}, acknowledgePortal\)/);
 });
 
 test("🔴 자기 것이 앞, 포털에서 온 것이 뒤 — 개수는 각자 센 값을 더한다", () => {
@@ -546,21 +560,102 @@ test("🔴 우리 줄을 누르면 확인을 적고 **먼저 감춘다**", () =>
   assert.deepEqual(restored, [], "적기도 전에 되살렸다");
 });
 
-test("🔴 포털에서 온 줄은 **적지도 감추지도** 않는다 — sourceId 가 가른다", () => {
-  const asked: string[] = [];
+/** 포털에서 온 줄 한 장 — sourceId 가 있어 우리 것이 아니다(우리 열쇠 모양도 아니다). */
+function portalRow(): NotificationBellItem {
+  return {
+    ...ownRow(),
+    key: "rf-service-system:APPROVAL:123",
+    sourceId: "rf-service-system",
+    id: "APPROVAL:123",
+  };
+}
+
+test("🔴 포털에서 온 줄은 **포털에** 확인을 적는다 — 우리 표에는 안 적힌다 (2026-10-22)", () => {
+  // 2026-10-20 까지는 「적지도 감추지도 않는다」가 맞았다 — 포털에 확인을 적는
+  // 통로가 없었기 때문이다. 2026-10-22 에 그 통로가 생겨 이 단언이 뒤집힌다.
+  const askedOwn: string[] = [];
+  const askedPortal: string[] = [];
   const hidden: string[] = [];
 
   acknowledgePickedNotification(
-    { ...ownRow(), key: "rf-service-system:APPROVAL:123", sourceId: "rf-service-system", id: "APPROVAL:123" },
+    portalRow(),
     async ({ notificationKey }) => {
-      asked.push(notificationKey);
+      askedOwn.push(notificationKey);
       return { ok: true };
     },
     { hide: (key) => hidden.push(key), restore: () => {} },
+    async ({ notificationKey }) => {
+      askedPortal.push(notificationKey);
+      return { ok: true };
+    },
   );
 
-  assert.deepEqual(asked, [], "🔴 남의 시스템 알림 id 로 우리 확인 기록을 적는다");
-  assert.deepEqual(hidden, [], "적지도 않을 줄을 감췄다 — 눈에서만 사라지고 다시 돌아온다");
+  // 🔴 우리 표(notification_acknowledgements)에는 여전히 안 적힌다 — 남의
+  //    시스템 알림 id 로 우리 확인 기록을 적을 자리가 아니다.
+  assert.deepEqual(askedOwn, [], "🔴 포털 줄인데 우리 확인 액션(acknowledgeNotificationAction)을 불렀다");
+  // 🔴 포털에는 **item.key**로 적힌다(`id` 가 아니다) — 포털의 열쇠는
+  //    `{client_id}:{id}` 모양이라 그 값이어야 포털에서 그 줄을 찾는다
+  //    (domain/notifications.ts 의 bellKeyOf 머리말).
+  assert.deepEqual(askedPortal, ["rf-service-system:APPROVAL:123"]);
+  // 🔵 감추지는 않는다 — 이 줄의 href 는 다른 시스템의 절대 주소라 누르면
+  //    하드 네비게이션으로 이 페이지를 떠난다(포트가 다르면 출처가 달라
+  //    새 페이지 로드다). 감췄다 되살리는 장치는 뜻이 없고, 포털 줄의 count 는
+  //    줄 수와 다를 수 있어(normalizePortalNotificationFeed 시험) 「감춘
+  //    수만큼 뺀다」는 visibleCount 의 셈을 끌어들이면 틀어진다.
+  assert.deepEqual(hidden, []);
+});
+
+test("🔴 우리 줄을 누르면 포털 확인 함수는 **부르지 않는다** — 제 줄이 포털로 안 간다", () => {
+  const askedPortal: string[] = [];
+  const acknowledgePortal = async ({ notificationKey }: { notificationKey: string }) => {
+    askedPortal.push(notificationKey);
+    return { ok: true };
+  };
+
+  acknowledgePickedNotification(
+    ownRow(),
+    async () => ({ ok: true }),
+    { hide: () => {}, restore: () => {} },
+    acknowledgePortal,
+  );
+
+  assert.deepEqual(askedPortal, [], "🔴 우리 줄의 확인이 포털로 나갔다 — 그 집의 옛 기록은 포털이 모른다");
+});
+
+test("🔴 포털 확인 함수가 없으면 아무 일도 하지 않는다 — 감췄다가 되돌아오는 일이 없다", () => {
+  const hidden: string[] = [];
+  assert.doesNotThrow(() =>
+    acknowledgePickedNotification(portalRow(), async () => ({ ok: true }), {
+      hide: (key) => hidden.push(key),
+      restore: () => {},
+    }),
+  );
+  assert.deepEqual(hidden, []);
+});
+
+test("🔴 포털 확인이 실패하거나 던져도 조용히 넘어간다 — 감춘 것이 없어 되살릴 것도 없다", async () => {
+  assert.doesNotThrow(() =>
+    acknowledgePickedNotification(portalRow(), undefined, { hide: () => {}, restore: () => {} }, async () => ({
+      ok: false,
+    })),
+  );
+  assert.doesNotThrow(() =>
+    acknowledgePickedNotification(
+      portalRow(),
+      undefined,
+      { hide: () => {}, restore: () => {} },
+      () => {
+        throw new Error("sync");
+      },
+    ),
+  );
+  assert.doesNotThrow(() =>
+    acknowledgePickedNotification(portalRow(), undefined, { hide: () => {}, restore: () => {} }, async () => {
+      throw new Error("network");
+    }),
+  );
+  // 처리되지 않은 거절이 남지 않는지 한 박자 기다려 본다(남으면 개발 중 오류판이 뜬다).
+  await new Promise((resolve) => setTimeout(resolve, 0));
 });
 
 test("🔴 저장이 실패하면 줄을 되살린다 — 적지 못한 것을 적은 것처럼 보이게 하지 않는다", async () => {

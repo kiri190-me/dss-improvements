@@ -39,6 +39,11 @@ import { shouldAcknowledgeNotification } from "@/lib/domain/notifications";
  * DB 를 물고 있어서, 여기서 가져오면 이 조각을 그냥 불러 보는 시험이 그 사슬을
  * 통째로 끌고 온다. 받아서 쓰면 시험이 가짜 함수를 넘겨 「언제 부르는가」를
  * 그대로 볼 수 있다(A/S 가 같은 이유로 같은 모양을 쓴다).
+ *
+ * 🔴 2026-10-22 — **같은 모양**을 포털 확인(아래 `acknowledgePortal` prop)에도
+ * 그대로 쓴다. 적히는 **표**가 다를 뿐 함수 모양은 같아서 타입을 하나 더
+ * 만들지 않았다. 넘기는 **값**이 다르다 — 우리 줄은 `item.id`, 포털 줄은
+ * `item.key`다(갈라 부르는 자리는 아래 acknowledgePickedNotification).
  */
 export type AcknowledgeNotification = (input: {
   notificationKey: string;
@@ -83,15 +88,42 @@ export type AcknowledgeView = {
 };
 
 /**
- * 눌린 줄 하나를 처리한다 — **가리고 · 미리 감추고 · 뒤에서 적는다.**
+ * 눌린 줄 하나를 처리한다 — 우리 줄은 **가리고 · 미리 감추고 · 뒤에서 적는다**,
+ * 포털 줄은 **가리고 · 포털에 적는다**(2026-10-22).
  *
  * 🔴 묶음은 **모든 줄에서** 이 경로로 들어온다. 우리 줄인지(sourceId 가 비었는지)와
- * 우리 열쇠 모양인지는 도메인 판정 한 곳이 정한다 — 서버 액션도 같은 함수를
- * 부르므로 두 곳이 갈라지지 않는다.
+ * 우리 열쇠 모양인지는 도메인 판정 한 곳(shouldAcknowledgeNotification)이
+ * 정한다 — 서버 액션도 같은 함수를 부르므로 두 곳이 갈라지지 않는다.
  *
- * 먼저 감추는 이유: 서버가 준 목록은 저장이 끝나고 다시 계산될 때까지 그 줄을
- * 그대로 들고 있다. 기다렸다 감추면 이동이 느린 동안 방금 누른 줄이 그대로
- * 보인다. 저장이 실패하면 되살린다.
+ * ── 🔴 2026-10-22 — 포털 줄도 이제 여기서 끝나지 않는다 ─────────────────
+ * 그 전까지는 판정이 거짓이면(포털에서 온 줄) 곧바로 돌아갔다 — 「확인했다」를
+ * 적을 수 있는 곳이 그 알림을 만든 시스템뿐이라고 보았기 때문이다. 이제
+ * 포털에 확인을 적는 통로가 생겼다(dss-auth 의
+ * /api/integration/notification-acknowledgements). **적히는 표**가 갈릴 뿐이다
+ * — 우리 줄은 우리 표(notification_acknowledgements)에, 포털 줄은 포털
+ * 한 곳에. 넘기는 **값**도 다르다 — 우리 줄은 `item.id`, 포털 줄은 `item.key`
+ * 다(포털의 열쇠가 `{client_id}:{id}` 모양이라 `id` 만으로는 포털에서 그 줄을
+ * 찾지 못한다 — domain/notifications.ts 의 bellKeyOf 머리말).
+ *
+ * 🔴 **제 줄은 여전히 포털로 가지 않는다.** `isOwn` 이 참이면 `acknowledgePortal`
+ * 은 아예 쳐다보지도 않는다 — 두 갈래가 섞이지 않게 if/else 로 완전히 가른다.
+ *
+ * ── 먼저 감추는 이유(우리 줄만) ─────────────────────────────────────────
+ * 서버가 준 목록은 저장이 끝나고 다시 계산될 때까지 그 줄을 그대로 들고
+ * 있다. 기다렸다 감추면 이동이 느린 동안 방금 누른 줄이 그대로 보인다.
+ * 저장이 실패하면 되살린다.
+ *
+ * ── 🔴 포털 줄은 **감추지 않는다** ──────────────────────────────────────
+ * 이유 둘이다.
+ *  · 이 줄의 href 는 다른 시스템의 절대 주소다. 누르면 **하드 네비게이션**
+ *    으로 이 페이지를 떠난다(포트가 다르면 브라우저가 보는 출처가 달라
+ *    새 페이지 로드다) — 감췄다 되살리는 장치가 뜻이 없다. 페이지 자체가
+ *    새로 뜨므로 「감춘 채로 영영 안 돌아온다」가 될 일도 없다.
+ *  · 아래 visibleCount 는 「감춘 수만큼 뺀다」를 **우리 줄 하나당 하나씩
+ *    세어진다**는 전제 위에서 계산한다. 포털의 count 는 줄 수와 다를 수
+ *    있어(normalizePortalNotificationFeed 시험 — A/S 가 같은 대상을 한 번만
+ *    센다) 포털 줄까지 그 셈에 끌어들이면 배지가 잠깐 어긋난다. 어차피
+ *    하드 네비게이션으로 떠나는 줄이라 감출 값어치가 없다.
  *
  * React 를 모르는 순수한 모양이라 시험이 그대로 불러 본다.
  */
@@ -99,30 +131,44 @@ export function acknowledgePickedNotification(
   item: NotificationBellItem,
   acknowledge: AcknowledgeNotification | undefined,
   view: AcknowledgeView,
+  acknowledgePortal?: AcknowledgeNotification,
 ): void {
-  if (!acknowledge) return;
-  // 🔴 포털에서 온 줄은 여기서 끝난다. 「확인했다」를 적을 수 있는 곳은 그 알림을
-  //    만든 시스템뿐이다 — 적어 봐야 우리 표에 쓸모없는 줄이 쌓이고, 그 알림은
-  //    남의 종에 그대로 남는다.
-  if (!shouldAcknowledgeNotification(item)) return;
+  if (shouldAcknowledgeNotification(item)) {
+    if (!acknowledge) return;
 
-  view.hide(item.key);
-  const restore = () => view.restore(item.key);
+    view.hide(item.key);
+    const restore = () => view.restore(item.key);
 
-  let pending: Promise<{ ok: boolean }>;
-  try {
-    pending = acknowledge({ notificationKey: item.id });
-  } catch {
-    // 액션을 부르는 것 자체가 실패했다(네트워크가 끊겼다든가). 줄을 되살린다.
-    restore();
+    let pending: Promise<{ ok: boolean }>;
+    try {
+      pending = acknowledge({ notificationKey: item.id });
+    } catch {
+      // 액션을 부르는 것 자체가 실패했다(네트워크가 끊겼다든가). 줄을 되살린다.
+      restore();
+      return;
+    }
+
+    // 🔴 두 갈래를 다 받는다 — 두 번째 인자가 없으면 거절이 「처리되지 않은
+    //    거절」이 되어 개발 중에는 화면에 오류판이 뜬다.
+    void Promise.resolve(pending).then((result) => {
+      if (!result?.ok) restore();
+    }, restore);
     return;
   }
 
-  // 🔴 두 갈래를 다 받는다 — 두 번째 인자가 없으면 거절이 「처리되지 않은
-  //    거절」이 되어 개발 중에는 화면에 오류판이 뜬다.
-  void Promise.resolve(pending).then((result) => {
-    if (!result?.ok) restore();
-  }, restore);
+  // ── 포털에서 온 줄(2026-10-22) ──────────────────────────────────────────
+  if (!acknowledgePortal) return;
+
+  let pending: Promise<{ ok: boolean }>;
+  try {
+    pending = acknowledgePortal({ notificationKey: item.key });
+  } catch {
+    // 감춘 것이 없으니 되살릴 것도 없다 — 조용히 넘어간다.
+    return;
+  }
+
+  // 🔴 처리되지 않은 거절을 남기지 않는다(위 우리 줄 갈래와 같은 까닭).
+  void Promise.resolve(pending).catch(() => {});
 }
 
 /**
@@ -199,6 +245,7 @@ export function NotificationBellWithAcknowledge({
   items,
   count,
   acknowledge,
+  acknowledgePortal,
   dismiss,
   dismissAll,
 }: {
@@ -208,6 +255,13 @@ export function NotificationBellWithAcknowledge({
   count: number;
   /** 없으면 확인을 적지 않는다 — 줄은 이동만 하고 종에 남는다. */
   acknowledge?: AcknowledgeNotification;
+  /**
+   * 🔴 포털에서 온 줄(남의 시스템 알림)의 확인을 **포털에** 적는 자리
+   * (2026-10-22). 없으면 그 줄은 지금까지와 같이 확인을 적지 않는다 — 줄은
+   * 이동만 하고 종에 남는다. `acknowledge`(우리 표)와 **모양은 같지만 다른
+   * 함수**다 — 적히는 곳이 다르다.
+   */
+  acknowledgePortal?: AcknowledgeNotification;
   /** 🔴 없으면 ✕ 가 **아예 그려지지 않는다**(@dss/ui 의 onDismiss). */
   dismiss?: DismissNotification;
   /**
@@ -282,7 +336,7 @@ export function NotificationBellWithAcknowledge({
               next.delete(key);
               return next;
             }),
-        })
+        }, acknowledgePortal)
       }
     />
   );

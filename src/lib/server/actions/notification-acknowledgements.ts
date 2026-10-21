@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { canReceiveImprovementRequestNotifications } from "@/lib/auth/improvement-request-authorization";
+import { acknowledgePortalNotification } from "@/lib/auth/oidc";
 import { getSessionUser } from "@/lib/auth/session";
 import {
   markNotificationAcknowledged,
@@ -69,6 +70,63 @@ export async function acknowledgeNotificationAction(input: {
   } catch (error) {
     // 오류의 종류만 남긴다 — 값(열쇠·사람)은 싣지 않는다.
     console.error("acknowledgeNotificationAction: unexpected DB error", {
+      name: error instanceof Error ? error.name : "unknown",
+    });
+    return { ok: false };
+  }
+}
+
+/**
+ * ============================================================================
+ * 알림 확인 — **포털 줄** (2026-10-22)
+ * ============================================================================
+ * 종의 줄을 눌렀는데 그 줄이 **남의 시스템 알림**이면(shouldAcknowledgeNotification
+ * 이 거짓) 클라이언트 껍데기(components/NotificationBellWithAcknowledge.tsx)가
+ * 위 acknowledgeNotificationAction 대신 **이 액션**을 부른다.
+ *
+ * ── 위 액션과 같은 것 ────────────────────────────────────────────────────
+ * 서버 액션인 까닭 · 세션을 다시 읽는 까닭 · 던지지 않는 까닭 · 돌려주는 것이
+ * `{ ok }` 하나뿐인 까닭은 위 acknowledgeNotificationAction 머리말과 같다 —
+ * 되풀이하지 않는다.
+ *
+ * ── 🔴 다른 것 ──────────────────────────────────────────────────────────
+ *  · **적는 곳이 우리 표가 아니라 포털이다.** 우리 DB 에는 아무것도 쓰지
+ *    않는다 — 그 알림을 만든 시스템이 우리가 아니기 때문이다(그 알림은
+ *    남의 업무 자료에서 파생됐다).
+ *  · **권한을 따로 보지 않는다.** `canReceiveImprovementRequestNotifications`
+ *    는 **우리 알림**(개선요청)을 받을 수 있는 사람인지만 가린다 — 포털에서
+ *    온 알림과는 무관한 권한이다. 포털에 적히는 것은 **그 사람 몫으로만**이고
+ *    (`sub` 는 바로 아래서 서버가 세션으로 정한다), 모르는 시스템의 열쇠나
+ *    모양이 틀린 열쇠는 포털이 조용히 버린다 — notification-dismissals.ts 의
+ *    dismissNotificationAction 과 같은 판단이다.
+ *  · **열쇠 모양을 서버가 다시 가리지 않는다.** 위 액션은 `isOwnNotificationKey`
+ *    로 우리 모양인지 다시 본다(우리 표에 쓰레기가 쌓이면 안 되므로). 여기서는
+ *    그럴 필요가 없다 — 포털이 모르는 모양은 제 손으로 버리고(skipped), 여기는
+ *    아무 표에도 쓰지 않는다. 빈 문자열만 걸러 포털에 거절 한 줄을 로그에
+ *    쌓는 헛걸음을 막는다.
+ * ============================================================================
+ */
+export async function acknowledgePortalNotificationAction(input: {
+  notificationKey: string;
+}): Promise<{ ok: boolean }> {
+  const actor = await getSessionUser();
+  if (!actor) return { ok: false };
+
+  // 🔴 포털에 적을 열쇠는 **item.key**다(`{client_id}:{id}` 모양) — 클라이언트
+  //    껍데기가 이미 그 값을 보낸다(NotificationBellWithAcknowledge 의
+  //    acknowledgePickedNotification). 모양을 더 가리지 않는 까닭은 위에 있다.
+  const notificationKey = typeof input?.notificationKey === "string" ? input.notificationKey : "";
+  if (notificationKey === "") return { ok: false };
+
+  try {
+    const recorded = await acknowledgePortalNotification(actor.authSub, notificationKey);
+    if (!recorded) return { ok: false };
+
+    revalidatePath(LIST_PATH);
+    return { ok: true };
+  } catch (error) {
+    // 오류의 종류만 남긴다 — 값(열쇠·사람)은 싣지 않는다.
+    console.error("acknowledgePortalNotificationAction: unexpected error", {
       name: error instanceof Error ? error.name : "unknown",
     });
     return { ok: false };

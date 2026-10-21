@@ -551,7 +551,18 @@ describe("🔴 확인 기록은 깨지지 않는다 — 넘어가는 값은 `id`
     // 소스에도 못 박는다 — 가짜 함수를 넘기는 위 시험만으로는 다른 경로가
     // 생겼을 때 조용히 지나간다.
     assert.match(bellShell, /acknowledge\(\{ notificationKey: item\.id \}\)/);
-    assert.equal(/notificationKey: item\.key/.test(bellShell), false);
+    // 🔴 2026-10-22 — 이 파일 전체에서 `item.key` 가 사라지는 것은 더는
+    //    맞는 말이 아니다. 포털 줄의 확인(`acknowledgePortal`)이 **정당하게**
+    //    `item.key` 를 쓴다(포털의 열쇠가 `{client_id}:{id}` 모양이라 `id` 만
+    //    으로는 포털에서 그 줄을 찾지 못한다 — oidc.ts 의
+    //    acknowledgePortalNotification 머리말). 이 시험이 지키려는 것은
+    //    **우리 표로 가는 `acknowledge(` 호출 하나**뿐이다 — `acknowledgePortal(`
+    //    은 이름이 달라 아래 패턴에 걸리지 않는다(괄호가 바로 안 붙는다).
+    assert.equal(
+      /acknowledge\(\{ notificationKey: item\.key \}\)/.test(bellShell),
+      false,
+      "🔴 우리 확인 액션(acknowledge)에 item.key 가 넘어간다 — 옛 확인 기록과 모양이 달라진다",
+    );
   });
 
   it("🔴 접두사가 붙은 열쇠는 확인 기록 표에 **들어가지 못한다** — 모양 검사가 막는다", () => {

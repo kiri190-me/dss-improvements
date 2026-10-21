@@ -684,3 +684,102 @@ export async function dismissPortalNotifications(
 
   return recorded;
 }
+
+/* ------------------------------------------------------------------ */
+/* 「이 알림은 확인했다」를 포털에 적는다 (쓰는 쪽, 2026-10-22)            */
+/*                                                                     */
+/* 🔴 ✕(dismissPortalNotifications)와 **뜻이 다르다.** ✕ 는 「지금은     */
+/* 그만 보겠다」라 재로그인하면 돌아오고, 줄을 **누르는 것**은 「해소됐다」 */
+/* 라 돌아오지 않는다. 포털의 표도 그래서 둘이다(dss-auth/docs/          */
+/* 사이트-알림-통로.md 의 「acknowledged」절).                           */
+/*                                                                     */
+/* 🔴 무엇을 없앨지 이 사이트는 판단하지 않는다 — 나가는 것은 열쇠뿐이고, */
+/* 포털이 제 목록에서 그 줄을 찾아 **내용 지문을 직접 계산**해 적는다.    */
+/* 종에서 빠지는 것은 (기록이 있고 · 지문이 지금 내용과 같고 · 분류가     */
+/* 「정보 확인용」) 셋이 다 맞을 때뿐이라, 결재 승인·부품 요청처럼        */
+/* **동작이 필요한 줄은 확인을 적어도 남는다.**                          */
+/*                                                                     */
+/* 🔴 이 사이트에서 포털로 보내는 확인은 **남의 시스템 알림뿐이다** —     */
+/* 이 사이트 자신의 알림(IMPROVEMENT_REQUEST:…)은 여기로 오지 않는다.     */
+/* 그 알림의 확인은 우리 표(notification_acknowledgements)에 적힌다       */
+/* (server/actions/notification-acknowledgements.ts 의                  */
+/* acknowledgeNotificationAction — 가르는 판정은 domain/notifications.ts */
+/* 의 shouldAcknowledgeNotification 한 곳뿐이고, 그 판정을 두 번 적지     */
+/* 않는다. components/NotificationBellWithAcknowledge.tsx 의             */
+/* acknowledgePickedNotification 이 그 판정으로 어느 함수를 부를지        */
+/* 가른다).                                                             */
+/*                                                                     */
+/* 읽는 쪽(fetchPortalNotifications)·지움 쪽(dismissPortalNotifications) */
+/* 과 같은 자격증명·같은 상한·같은 거절이다. 그래서 같은 파일에 나란히    */
+/* 둔다.                                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 「이 알림은 확인했다」를 포털에 적는다. 🔴 **어떤 일이 있어도 던지지
+ * 않는다** — 읽는 쪽·지움 쪽과 같은 약속이다. 못 적으면 그 줄이 종에
+ * 남을 뿐이고, 그것이 화면이 깨지는 것보다 훨씬 낫다.
+ *
+ * @param subject 포털의 users.id (= ID 토큰의 sub). 이 사이트는
+ *                `web_users.authSub` 로 들고 있다. 🔴 **서버가 제 세션에서
+ *                읽은 값**이어야 한다 — 브라우저가 보낸 값을 그대로 넘기면
+ *                남의 알림을 확인 처리하는 통로가 된다.
+ * @param key `{client_id}:{id}` 모양 **하나**. 모양이 틀리거나 모르는
+ *            시스템의 것은 포털이 조용히 버린다(skipped).
+ *
+ * 🔴 지움과 달리 **열쇠를 하나만 받는다.** 확인은 줄을 하나 누르는 일이라
+ *    열쇠가 언제나 하나다 — 「확인 전부」 같은 단추가 생기는 날 그때 여러
+ *    개를 나눠 보내는 길을 더한다(포털의 상한은 지움과 같은 값이다).
+ *
+ * @returns 적혔는가. 🔵 몇 번을 다시 보내도 안전하다 — 같은 열쇠를 두 번
+ *          확인하는 것은 한 번 확인하는 것과 같다.
+ */
+export async function acknowledgePortalNotification(
+  subject: string,
+  key: string,
+): Promise<boolean> {
+  if (!subject) return false;
+  if (!key) return false;
+
+  let response: Response;
+  try {
+    // env 의 getter 는 값이 없으면 던진다 — 그래서 try 안에서 읽는다. 설정이
+    // 빠진 것 때문에 줄 한 번 누르기가 화면을 깨면 안 된다(읽는 쪽·지움 쪽과
+    // 같은 판단).
+    const credentials = `${encodeURIComponent(env.ssoClientId)}:${encodeURIComponent(
+      env.ssoClientSecret,
+    )}`;
+
+    response = await fetch(
+      `${env.ssoIssuer}/api/integration/notification-acknowledgements`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Basic ${Buffer.from(credentials, "utf8").toString("base64")}`,
+          "content-type": "application/x-www-form-urlencoded",
+          accept: "application/json",
+        },
+        // 🔴 칸 이름은 `keys` 다(하나여도) — 지움 통로와 **같은 몸통 모양**이고,
+        //    포털도 같은 파서를 쓴다.
+        body: new URLSearchParams({ sub: subject, keys: key }).toString(),
+        cache: "no-store",
+        signal: AbortSignal.timeout(NOTIFICATIONS_TIMEOUT_MS),
+      },
+    );
+  } catch (error) {
+    // 🔴 남기는 것은 오류의 **종류**뿐이다. 열쇠에는 개선요청 id 같은 업무
+    //    식별자가 들어 있어 그것도 찍지 않는다(읽는 쪽·지움 쪽과 같다).
+    console.error(
+      "[sso] 알림 확인을 적지 못했습니다:",
+      error instanceof Error ? error.name : "unknown",
+    );
+    return false;
+  }
+
+  if (!response.ok) {
+    // 거절 본문은 포털의 내부 설정을 설명할 수 있다. 상태만 남긴다.
+    console.error("[sso] 알림 확인 통로 거절:", response.status);
+    return false;
+  }
+
+  return true;
+}
