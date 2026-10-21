@@ -191,6 +191,9 @@ test("🔴 시스템당 200줄에서 자르고, 개수도 자른 뒤의 줄 수�
 test("설정 표는 **코드에 있는 규칙 그대로**다 — 종류 하나, 받는 사람은 관리자", () => {
   const settings = improvementRequestNotificationSettings();
 
+  // 🔴 2026-10-22(쓰는 분 요구 ⑧ — 관리자를 앞에): USER_ROLES(db/schema.ts) 가
+  //    이미 ["ADMIN", "MEMBER"] 순이라 이 저장소는 코드를 고치지 않았다. 아래
+  //    확인은 그 사실이 나중에 조용히 뒤집히지 않도록 지키는 것이다.
   assert.deepEqual(
     settings.roles.map((role) => role.code),
     ["ADMIN", "MEMBER"],
@@ -203,6 +206,11 @@ test("설정 표는 **코드에 있는 규칙 그대로**다 — 종류 하나, 
   assert.equal(kind.defaultEnabled, true);
   assert.deepEqual(kind.roles.ADMIN, { receives: true, defaultReceives: true });
   assert.deepEqual(kind.roles.MEMBER, { receives: false, defaultReceives: false });
+});
+
+test("🔴 2026-10-22: 관리자가 역할 열의 맨 앞이다 — 글자(label)가 아니라 코드로 잰다", () => {
+  const settings = improvementRequestNotificationSettings();
+  assert.equal(settings.roles[0]?.code, "ADMIN", "관리자가 첫 칸이 아니다");
 });
 
 test("🔴 모든 칸이 editable: false 다 — 저장할 표가 없다는 사실을 화면이 알아야 한다", () => {
