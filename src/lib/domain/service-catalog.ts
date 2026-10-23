@@ -211,6 +211,113 @@ export const SERVICE_CATALOG: readonly ServiceEntry[] = [
       { key: "developerMode", label: "개발자 모드", groupKey: "systemSettings" },
     ],
   },
+  /* ──────────────────────────────────────────────────────────────────────
+   * 🔴 2026-10-23 에 **다섯이 더해졌다** (쓰는 분 요청: 「새롭게 더해진 시스템들도
+   *    고를 수 있도록」). 그 전에는 다섯뿐이라, 재고·PO·게시판·휴가·RF 이슈관리에
+   *    대한 요청을 적을 곳이 **「시스템 아님」밖에 없었다.**
+   *
+   * 🔴 **열쇠는 포털에 등록된 clientId 를 그대로 쓴다.** 지어내지 않았다 —
+   *    dss-auth/src/lib/notifications/sources.ts 에 박힌 글자를 옮겼고, 이로써
+   *    포털이 아는 열 중 「포털 자신(dss-auth)」까지 **열 개가 전부** 여기 선다.
+   *    🔵 특히 RF 이슈관리는 **`dss-rf-trouble`** 이다 — 저장소 이름(`dss-trouble`)과
+   *       다르다. 저장소 이름으로 적으면 나중에 포털과 맞대는 날 조용히 어긋난다.
+   *
+   * 🔴 **기존 다섯은 한 칸도 건드리지 않았다** — 열쇠도 이름도 메뉴도 차례도.
+   *    아래 다섯은 사이에 끼운 새 덩어리이고, 걷어내면 예전 목록이 글자 그대로 나온다.
+   * ────────────────────────────────────────────────────────────────────── */
+  {
+    // 포털 등록: `dss-inventory`. A/S 에서 떨어져 나온 시스템이라 바로 위에 둔다.
+    key: "dss-inventory",
+    label: "DSS 재고 관리",
+    /**
+     * 이름과 열쇠는 그 저장소의 머리말(dss-inventory/src/components/AppHeader.tsx)과
+     * 각 화면의 `metadata.title` 에서 가져왔다. 라우트는 옆에 적어 둔다.
+     * 🔵 설정 밑이 여럿인데 그대로 편다 — 「승인 절차가 이상해요」와 「엑셀 상태가
+     *    안 맞아요」는 고치는 사람도 고치는 자리도 다르다.
+     */
+    menus: [
+      { key: "stockList", label: "재고 현황" }, // /
+      { key: "entryNew", label: "수량 변경 기록" }, // /entries/new
+      { key: "entries", label: "기록 내역" }, // /entries
+      { key: "requests", label: "부품 요청" }, // /requests
+      { key: "approvals", label: "승인 요청건" }, // /approvals
+      { key: "partNew", label: "부품 등록" }, // /parts/new
+      { key: "settingsItems", label: "항목 관리" }, // /settings/items
+      { key: "settingsOhTemplates", label: "O/H 부품 템플릿" }, // /settings/oh-templates
+      { key: "settingsApprovalRoutes", label: "승인 절차" }, // /settings/approval-routes
+      { key: "settingsDelegations", label: "결재권 위임" }, // /settings/delegations
+      { key: "settingsWorkbook", label: "엑셀 상태" }, // /settings/workbook
+      { key: "settingsTransition", label: "전환일" }, // /settings/transition
+      { key: "audit", label: "변경 이력" }, // /audit
+    ],
+  },
+  {
+    // 포털 등록: `dss-po`. 역할을 쓰지 않는 유일한 시스템이다(dss-auth 의 client-access-values.ts).
+    key: "dss-po",
+    label: "DSS PO / 내자",
+    /**
+     * 🔴 **열쇠 셋이 위 `rf-service-system` 의 것과 같다**(domesticOrders · quotes ·
+     *    repairLabor). 베낀 것이 아니라 **같은 화면이 저리로 옮겨 간 것**이고, 그쪽
+     *    navigation.ts 에 그 열쇠가 그대로 살아 있다(dss-po/src/lib/navigation.ts).
+     *    같은 글에 같은 열쇠가 붙어 있어야, 옛 글을 이 서비스로 옮기는 날 열쇠를
+     *    갈아 끼우지 않아도 된다 — 위 A/S 머리말이 적은 그 까닭 그대로다.
+     */
+    menus: [
+      { key: "domesticOrders", label: "내자 정리" }, // /domestic-orders
+      { key: "quotes", label: "견적서" }, // /quotes
+      { key: "repairLabor", label: "작업 비용" }, // /repair-labor
+    ],
+  },
+  {
+    // 포털 등록: `dss-board` (2026-10-13, 포털 알림의 넷째 사이트).
+    key: "dss-board",
+    label: "DSS 사내 게시판",
+    /**
+     * 화면이 넷뿐이다. 머리말(dss-board/src/components/site-header.tsx)에는 [사용자 관리]
+     * 하나만 걸려 있고 나머지는 목록에서 눌러 들어간다 — 그래서 라우트에서 옮겨 적었다.
+     */
+    menus: [
+      { key: "posts", label: "글 목록" }, // /
+      { key: "postNew", label: "새 글 쓰기" }, // /posts/new
+      { key: "postDetail", label: "글 보기 · 수정" }, // /posts/[id]
+      { key: "adminUsers", label: "사용자 관리" }, // /admin/users
+    ],
+  },
+  {
+    // 포털 등록: `dss-leave`.
+    key: "dss-leave",
+    label: "DSS 휴가 관리",
+    /** 이름과 차례는 그 저장소 머리말(dss-leave/src/components/AppHeader.tsx)의 `NavLink` 그대로다. */
+    menus: [
+      { key: "calendar", label: "달력" }, // /
+      { key: "leaveNew", label: "휴가 신청" }, // /leave/new
+      { key: "myLeave", label: "내 휴가" }, // /leave
+      { key: "approvals", label: "결재함" }, // /approvals
+      { key: "adminEmployees", label: "직원 관리" }, // /admin/employees
+      { key: "adminSettings", label: "휴가 설정" }, // /admin/settings
+    ],
+  },
+  {
+    /**
+     * 포털 등록: **`dss-rf-trouble`** — 🔴 저장소 이름(`dss-trouble`)과 **다르다.**
+     * 2026-10-22 에 선 아홉째 사이트다(dss-deploy/README.md 서른두째 배포).
+     */
+    key: "dss-rf-trouble",
+    label: "DSS RF 이슈관리",
+    /**
+     * 🔵 Next.js 가 아니라 `server.js` 한 장 + 정적 HTML 이고, 화면이 **한 장에 탭 여섯**이다.
+     *    그래서 라우트가 아니라 탭을 옮겨 적었다 — 열쇠는 그쪽 `data-tab` 값 그대로다
+     *    (dss-trouble/public/index.html).
+     */
+    menus: [
+      { key: "search", label: "통합검색" },
+      { key: "issues", label: "이슈 관리" },
+      { key: "weekly", label: "주간보고" },
+      { key: "trips", label: "출장 일정" },
+      { key: "map", label: "지식맵" },
+      { key: "settings", label: "설정" },
+    ],
+  },
   {
     // 포털 등록: `dss-meters` (njlee/CLAUDE.md 의 등록 절차).
     key: "dss-meters",

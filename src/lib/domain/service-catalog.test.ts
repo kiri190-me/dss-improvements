@@ -365,3 +365,87 @@ test("🔴 선택칸 글자는 저장되는 값에도 이름표에도 섞이지 
     assert.equal(menuLabel("rf-service-system", menu.key), menu.label);
   }
 });
+
+/*
+ * ============================================================================
+ * 🔴 포털이 아는 시스템이 전부 여기 선다 (2026-10-23)
+ * ============================================================================
+ * 「새롭게 더해진 시스템들도 고를 수 있도록 추가해 줘」가 요청 그대로다. 그 전에는
+ * 다섯뿐이라, 재고·PO·게시판·휴가·RF 이슈관리에 대한 요청을 적을 곳이 **「시스템
+ * 아님」밖에 없었다** — 고쳐야 할 사람에게 가지 않는다.
+ *
+ * 🔴 **열쇠는 지어낸 것이 아니라 포털의 clientId 다.** 아래 열은
+ *    `dss-auth/src/lib/notifications/sources.ts` 에 박힌 글자를 옮겨 적은 것이다.
+ *    같은 것을 가리키는 열쇠가 시스템마다 다르면 **오류가 한 번도 안 나면서** 영영
+ *    어긋난다 — 특히 RF 이슈관리는 열쇠(`dss-rf-trouble`)와 저장소 이름(`dss-trouble`)이
+ *    달라서 베껴 쓰다 틀리기 쉽다.
+ *
+ * 🔴 **이 시험이 못 잡는 것**을 적어 둔다: 포털에 **새 시스템이 또 붙는 날**은 여기서
+ *    안 깨진다(저쪽 파일을 읽지 못한다 — 다른 저장소다). 이 시험이 지키는 것은
+ *    「지금 있는 열이 조용히 사라지지 않는 것」이다.
+ * ============================================================================
+ */
+test("🔴 포털에 등록된 시스템 열이 모두 고를 수 있다", () => {
+  /** dss-auth/src/lib/notifications/sources.ts 의 clientId 전부 (2026-10-23 기준). */
+  const PORTAL_CLIENT_IDS = [
+    "rf-service-system",
+    "dss-inventory",
+    "dss-po",
+    "dss-board",
+    "dss-leave",
+    "dss-rf-trouble",
+    "dss-meters",
+    "dss-auth",
+    "dss-improvements",
+    "dss-home",
+  ] as const;
+  for (const clientId of PORTAL_CLIENT_IDS) {
+    assert.ok(isServiceKey(clientId), `포털의 ${clientId} 를 개선요청에서 고를 수 없습니다`);
+    assert.ok(listMenusOf(clientId).length > 0, `${clientId} 에 고를 메뉴가 없습니다`);
+  }
+  // 🔵 「시스템 아님」은 포털 열쇠가 아니다. 그것까지 세면 열하나다.
+  assert.equal(listServices().length, PORTAL_CLIENT_IDS.length + 1, "서비스 수가 「포털 열 + 시스템 아님」과 다릅니다");
+});
+
+test("🔴 2026-10-23 에 더한 다섯의 메뉴가 그 시스템의 것이다", () => {
+  // 🔵 「있다」만 재면 빈 목록도 통과한다. **그 시스템에만 있는 메뉴**로 가른다.
+  const has = (service: string, menu: string) => isMenuKeyOf(service, menu);
+  assert.ok(has("dss-inventory", "settingsOhTemplates"), "재고 관리에 O/H 부품 템플릿이 없다");
+  assert.ok(!has("dss-inventory", "quotes"), "재고 관리에 견적서가 섞였다");
+  assert.ok(has("dss-board", "postNew"), "사내 게시판에 새 글 쓰기가 없다");
+  assert.ok(has("dss-leave", "calendar"), "휴가 관리에 달력이 없다");
+  assert.ok(has("dss-rf-trouble", "weekly"), "RF 이슈관리에 주간보고가 없다");
+  assert.ok(!has("dss-rf-trouble", "calendar"), "RF 이슈관리에 휴가 달력이 섞였다");
+
+  /**
+   * 🔴 **PO 의 열쇠 셋은 A/S 와 같아야 한다.** 베낀 것이 아니라 같은 화면이 옮겨 간
+   *    것이고, 옛 글에 그 열쇠가 붙어 있다 — 열쇠를 새로 지었다면 옮기는 날 글마다
+   *    대응표가 필요했을 것이고, 그 표는 틀리면 조용히 틀린다.
+   */
+  for (const menu of ["domesticOrders", "quotes", "repairLabor"]) {
+    assert.ok(has("dss-po", menu), `PO / 내자에 ${menu} 가 없다`);
+    assert.ok(has("rf-service-system", menu), `A/S 쪽 ${menu} 가 사라졌다 — 옛 글의 열쇠가 갈 곳이 없어진다`);
+  }
+});
+
+test("🔵 기존 다섯은 한 칸도 안 바뀌었다 — 이번 변경은 **더하기만** 했다", () => {
+  // 🔴 새 줄을 사이에 끼우면서 옛 줄을 건드리면, 이미 쌓인 글의 열쇠가 가리키는 곳이 달라진다.
+  assert.deepEqual(
+    listMenusOf("dss-meters").map((m) => m.key),
+    ["meterList", "meterNew", "meterDetail", "certificates", "notifySettings"],
+  );
+  assert.deepEqual(
+    listMenusOf("dss-improvements").map((m) => m.key),
+    ["list", "new"],
+  );
+  assert.deepEqual(
+    listMenusOf("dss-home").map((m) => m.key),
+    ["company", "products", "inquiry", "investment", "recruit", "support"],
+  );
+  assert.deepEqual(
+    listMenusOf("dss-auth").map((m) => m.key),
+    ["signin", "apps", "releaseNotes", "adminUsers", "adminAudit"],
+  );
+  // 🔴 「시스템 아님」은 **맨 끝**이다 — 목록을 훑다가 「내 이야기는 여기 없네」에 닿는 자리다.
+  assert.equal(listServices().at(-1)?.key, OTHER_SERVICE_KEY, "「시스템 아님」이 맨 끝이 아니다");
+});
